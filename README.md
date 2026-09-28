@@ -4,6 +4,10 @@
 
 前端由 React 19 与 Vite 实现，桌面端由 Tauri 2 承载，同一套前端代码同时提供网页版与桌面版。
 
+## 下载
+
+Windows 安装包在 [Releases](https://github.com/fangzhouxiaohai/muse-pro/releases/latest) 页面下载，推荐使用安装程序 `Muse-Pro-0.1.0-x64-setup.exe`。详细文件说明见文末的下载安装包一节。
+
 ## 功能一览
 
 | 能力 | 说明 |
@@ -94,8 +98,27 @@ macOS 构建会生成 `.app` 与 `.dmg`，需要在 macOS 环境中执行。
 │   ├── icons                应用图标
 │   └── src/lib.rs           自定义命令：读取、写入、探测本机文件
 ├── brand                    品牌素材与视觉验收截图
-└── docs                     功能说明文档
+└── docs                     功能说明文档与联系方式素材
 ```
+
+## 下载安装包
+
+Windows 安装包可以从版本发布页直接下载：[Releases](https://github.com/fangzhouxiaohai/muse-pro/releases)
+
+| 下载文件 | 说明 |
+| --- | --- |
+| [Muse-Pro-0.1.0-x64-setup.exe](https://github.com/fangzhouxiaohai/muse-pro/releases/download/v0.1.0/Muse-Pro-0.1.0-x64-setup.exe) | 推荐。安装程序，安装时可切换简体中文与英文 |
+| [Muse-Pro-0.1.0-x64-zh-CN.msi](https://github.com/fangzhouxiaohai/muse-pro/releases/download/v0.1.0/Muse-Pro-0.1.0-x64-zh-CN.msi) | 简体中文安装包 |
+| [Muse-Pro-0.1.0-x64-en-US.msi](https://github.com/fangzhouxiaohai/muse-pro/releases/download/v0.1.0/Muse-Pro-0.1.0-x64-en-US.msi) | 英文安装包 |
+
+安装包适用于 Windows x64，需要 Windows 10 1809 及以上版本与 WebView2 运行时。macOS 的 `.app` 与 `.dmg` 需要在 macOS 环境中构建。
+
+## 联系方式
+
+- 邮箱：24519660@qq.com
+- 微信：扫描下方二维码添加
+
+<img src="docs/assets/wechat-qr.jpg" alt="微信二维码" width="260" />
 
 ## 文档
 

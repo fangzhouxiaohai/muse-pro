@@ -111,3 +111,20 @@
 ## 十、本地存储上限
 
 界面状态在每次变更后写入浏览器本地存储：最多保留 24 个会话（正在使用的会话始终保留）、每个会话最近 80 条消息、最近 6 份资料各保留前 2.4 万字，其余资料只保留名称与路径。超出上限的旧内容不再落盘，但仍留在当前会话的内存中。
+
+## 十一、版本发布与联系方式
+
+Windows 安装包发布在仓库的 Releases 页面：[Releases](https://github.com/fangzhouxiaohai/muse-pro/releases)
+
+| 发布文件 | 说明 |
+| --- | --- |
+| Muse-Pro-0.1.0-x64-setup.exe | NSIS 安装程序，安装时可切换简体中文与英文 |
+| Muse-Pro-0.1.0-x64-zh-CN.msi | 简体中文 MSI 安装包 |
+| Muse-Pro-0.1.0-x64-en-US.msi | 英文 MSI 安装包 |
+
+本地构建产物位于 `src-tauri/target/release`。上传到 Release 时把文件名中的空格替换为短横线，例如构建产物 `Muse Pro_0.1.0_x64-setup.exe` 对应发布资源 `Muse-Pro-0.1.0-x64-setup.exe`，这样直链可以稳定分享。
+
+联系方式：
+
+- 邮箱：24519660@qq.com
+- 微信：扫描 `docs/assets/wechat-qr.jpg` 中的二维码添加
