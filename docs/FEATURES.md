@@ -90,7 +90,7 @@
 
 - 窗口 1280x820，最小 420x560，居中启动，背景色与亮色主题一致。
 - 安全策略只允许自身资源、内联样式、本地字体与 http 与 https 请求，不加载外部脚本与字体。
-- 自定义命令：`read_text_file`、`write_text_file`、`file_exists`。写入时拒绝系统目录（Windows 的系统目录与 System32，macOS 的 /System、/Library、/private），路径指向目录或父目录不存在时给出中文错误。
+- 自定义命令：`read_text_file`、`write_text_file`、`file_exists`。写入时拒绝系统目录（Windows 的系统目录与 System32，macOS 的 /System、/Library、/private），父目录不存在时自动创建，路径为空或指向目录时给出中文提示。
 - 权限清单只保留核心能力、对话框、http 与打开链接，不授予通用文件系统权限。
 
 实现位置：`src-tauri/src/lib.rs`、`src-tauri/tauri.conf.json`、`src-tauri/capabilities/default.json`、`src/platform.ts`。

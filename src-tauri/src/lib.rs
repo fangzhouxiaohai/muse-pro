@@ -36,11 +36,6 @@ fn guard_target(path: &str, for_write: bool) -> Result<PathBuf, String> {
                 return Err("出于安全考虑，工作台不允许写入系统目录。".into());
             }
         }
-        if let Some(parent) = target.parent() {
-            if !parent.as_os_str().is_empty() && !parent.exists() {
-                return Err("目标目录不存在，请先创建目录。".into());
-            }
-        }
     }
     Ok(target)
 }
@@ -48,7 +43,7 @@ fn guard_target(path: &str, for_write: bool) -> Result<PathBuf, String> {
 #[tauri::command]
 fn read_text_file(path: String) -> Result<String, String> {
     let target = guard_target(&path, false)?;
-    if !target.exists() {
+    if !target.is_file() {
         return Err("没有找到这个文件，请确认路径是否正确。".into());
     }
     let meta = fs::metadata(&target).map_err(|error| format!("无法读取文件信息：{error}"))?;
@@ -65,7 +60,7 @@ fn write_text_file(path: String, content: String) -> Result<String, String> {
         return Err("内容超过 200 KB，请拆分为多个文件后再写入。".into());
     }
     if let Some(parent) = target.parent() {
-        if !parent.as_os_str().is_empty() && !Path::new(parent).exists() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
             fs::create_dir_all(parent).map_err(|error| format!("无法创建目录：{error}"))?;
         }
     }
