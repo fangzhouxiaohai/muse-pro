@@ -36,6 +36,17 @@ npm run tauri build # 构建当前平台的安装包
 
 在 Windows 上构建 Windows 安装包，在 macOS 上构建 macOS 应用。跨平台产物分别由对应系统的构建环境生成。
 
+Windows 构建完成后产物位于 `src-tauri/target/release`：
+
+| 产物 | 说明 |
+| --- | --- |
+| muse-pro.exe | 免安装的可执行文件 |
+| bundle/msi/Muse Pro_0.1.0_x64_zh-CN.msi | 简体中文 MSI 安装包 |
+| bundle/msi/Muse Pro_0.1.0_x64_en-US.msi | 英文 MSI 安装包 |
+| bundle/nsis/Muse Pro_0.1.0_x64-setup.exe | NSIS 安装程序，可在安装时切换语言 |
+
+macOS 构建会生成 `.app` 与 `.dmg`，需要在 macOS 环境中执行。
+
 ## 模型接入
 
 在工作空间的模型设置中填写兼容对话接口的完整地址、模型名称和密钥。

@@ -41,6 +41,9 @@
       "minimumSystemVersion": "11.0"
     },
     "windows": {
+      "wix": {
+        "language": ["zh-CN", "en-US"]
+      },
       "nsis": {
         "installMode": "currentUser",
         "languages": ["SimpChinese", "English"]
