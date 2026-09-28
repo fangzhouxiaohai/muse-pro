@@ -45,6 +45,8 @@ import { ActionsView, AuditView } from './components/RecordViews'
 const WORKSPACE_KEY = 'muse-pro-workspace-v2'
 const THEME_KEY = 'muse-pro-theme-v1'
 const FILE_LIMIT = 6
+const MESSAGE_LIMIT = 80
+const SESSION_LIMIT = 24
 
 type Persisted = { state: WorkspaceState; theme: 'light' | 'dark' }
 
@@ -60,16 +62,23 @@ function restore(): Persisted | null {
   }
 }
 
+function slimState(state: WorkspaceState): WorkspaceState {
+  const sessions = state.sessions.slice(-SESSION_LIMIT)
+  const active = state.sessions.find(item => item.id === state.activeSessionId)
+  if (active && !sessions.includes(active)) sessions[0] = active
+  return {
+    ...state,
+    sessions: sessions.map(session => ({ ...session, messages: session.messages.slice(-MESSAGE_LIMIT) })),
+    files: state.files.map((file, index, all) => ({
+      ...file,
+      content: index >= all.length - FILE_LIMIT ? file.content.slice(0, 24_000) : '',
+    })),
+  }
+}
+
 function persist(state: WorkspaceState, theme: 'light' | 'dark') {
   try {
-    const slim: WorkspaceState = {
-      ...state,
-      files: state.files.map((file, index, all) => ({
-        ...file,
-        content: index >= all.length - FILE_LIMIT ? file.content.slice(0, 24_000) : '',
-      })),
-    }
-    localStorage.setItem(WORKSPACE_KEY, JSON.stringify({ state: slim, theme }))
+    localStorage.setItem(WORKSPACE_KEY, JSON.stringify({ state: slimState(state), theme }))
     localStorage.setItem(THEME_KEY, theme)
   } catch {
     /* 存储空间不足时保持内存中的状态不变 */
@@ -130,11 +139,13 @@ export default function App() {
 
   const patchAssistant = useCallback((id: string, mutate: (steps: Step[]) => Step[]) => {
     setState(current => {
-      const target = current.sessions.find(item => item.id === current.activeSessionId)
+      let target: Message | undefined
+      for (const item of current.sessions) {
+        const found = item.messages.find(message => message.id === id)
+        if (found) { target = found; break }
+      }
       if (!target) return current
-      const message = target.messages.find(item => item.id === id)
-      if (!message) return current
-      return updateMessage(current, id, { steps: mutate(message.steps ?? []) })
+      return updateMessage(current, id, { steps: mutate(target.steps ?? []) })
     })
   }, [])
 

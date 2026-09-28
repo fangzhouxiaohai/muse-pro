@@ -6,3 +6,4 @@ src-tauri/target/
 .env.*
 !.env.example
 *.tsbuildinfo
+src-tauri/gen/schemas/

@@ -140,7 +140,12 @@ export function appendMessage(state: WorkspaceState, role: MessageRole, content:
 }
 
 export function updateMessage(state: WorkspaceState, id: string, patch: Partial<Message>): WorkspaceState {
-  return mapSession(state, state.activeSessionId, session => ({ ...session, messages: session.messages.map(item => item.id === id ? { ...item, ...patch } : item) }))
+  return {
+    ...state,
+    sessions: state.sessions.map(session => session.messages.some(item => item.id === id)
+      ? { ...session, messages: session.messages.map(item => item.id === id ? { ...item, ...patch } : item) }
+      : session),
+  }
 }
 
 export function proposeAction(state: WorkspaceState, request: ActionRequest): WorkspaceState {

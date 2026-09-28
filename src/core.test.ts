@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { approveAction, createInitialState, rejectAction, proposeAction, recordEvent, type WorkspaceState } from './core'
+import {
+  activeSession,
+  appendMessage,
+  approveAction,
+  createInitialState,
+  rejectAction,
+  proposeAction,
+  recordEvent,
+  startSession,
+  updateMessage,
+  type WorkspaceState,
+} from './core'
 
 describe('操作审批与审计', () => {
   it('待审批操作不会直接变成已执行', () => {
@@ -32,5 +43,24 @@ describe('操作审批与审计', () => {
     const next = recordEvent(state, 'task_created', '创建任务', '整理资料')
     expect(next.actions).toHaveLength(1)
     expect(next.audit.at(-1)?.detail).toBe('整理资料')
+  })
+})
+
+describe('会话与消息', () => {
+  it('切换会话后仍能更新原会话里的消息', () => {
+    const first = appendMessage(createInitialState(), 'user', '第一段对话')
+    const firstMessageId = activeSession(first).messages[0].id
+    const second = startSession(first)
+    expect(activeSession(second).id).not.toBe(activeSession(first).id)
+
+    const updated = updateMessage(second, firstMessageId, { content: '已经被更新' })
+    const origin = updated.sessions.find(item => item.id === activeSession(first).id)
+    expect(origin?.messages[0].content).toBe('已经被更新')
+    expect(activeSession(updated).messages).toHaveLength(0)
+  })
+
+  it('新建会话时首条用户消息会成为标题', () => {
+    const state = appendMessage(createInitialState(), 'user', '帮我整理下周的行程安排并记录成任务')
+    expect(activeSession(state).title).toBe('帮我整理下周的行程安排并记录成任务'.slice(0, 24))
   })
 })

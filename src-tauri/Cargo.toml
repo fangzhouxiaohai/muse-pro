@@ -15,5 +15,6 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
-tauri-plugin-http = "2"
+# 前端 @tauri-apps/plugin-http 目前最新为 2.7.0，这里锁定次版本号以保证两端一致
+tauri-plugin-http = "=2.7.0"
 tauri-plugin-opener = "2"
