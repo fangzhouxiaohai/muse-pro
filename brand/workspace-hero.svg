@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#faf6ef"/>
+      <stop offset="1" stop-color="#efe6d8"/>
+    </linearGradient>
+    <linearGradient id="arcA" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#b5644d" stop-opacity="0.92"/>
+      <stop offset="1" stop-color="#d69a80" stop-opacity="0.55"/>
+    </linearGradient>
+    <linearGradient id="arcB" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#71765b" stop-opacity="0.75"/>
+      <stop offset="1" stop-color="#a8ab8f" stop-opacity="0.30"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0" stop-color="#e8b98f" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#e8b98f" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="26"/>
+    </filter>
+    <filter id="grain">
+      <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="3" stitchTiles="stitch"/>
+      <feColorMatrix type="saturate" values="0"/>
+    </filter>
+  </defs>
+
+  <rect width="1440" height="900" fill="url(#sky)"/>
+  <circle cx="986" cy="352" r="330" fill="url(#glow)"/>
+  <circle cx="986" cy="352" r="196" fill="#f3d9bd" opacity="0.55" filter="url(#soft)"/>
+
+  <g opacity="0.9">
+    <path d="M 300 700 A 470 470 0 0 1 1240 700" fill="none" stroke="url(#arcA)" stroke-width="3"/>
+    <path d="M 420 700 A 350 350 0 0 1 1120 700" fill="none" stroke="url(#arcA)" stroke-width="2.4" opacity="0.8"/>
+    <path d="M 540 700 A 230 230 0 0 1 1000 700" fill="none" stroke="url(#arcB)" stroke-width="2" opacity="0.7"/>
+  </g>
+
+  <g stroke="#c9bfae" stroke-width="2" opacity="0.75">
+    <line x1="180" y1="700" x2="1260" y2="700"/>
+    <line x1="180" y1="606" x2="240" y2="606"/>
+    <line x1="1200" y1="606" x2="1260" y2="606"/>
+    <line x1="180" y1="512" x2="220" y2="512"/>
+    <line x1="1220" y1="512" x2="1260" y2="512"/>
+  </g>
+
+  <g fill="#2f2c26" opacity="0.86">
+    <circle cx="986" cy="352" r="10"/>
+    <circle cx="1156" cy="470" r="5"/>
+    <circle cx="838" cy="452" r="7"/>
+  </g>
+
+  <g opacity="0.55">
+    <rect x="150" y="200" width="300" height="1.5" fill="#8d8471"/>
+    <rect x="150" y="228" width="210" height="1.5" fill="#8d8471"/>
+    <rect x="150" y="256" width="248" height="1.5" fill="#8d8471"/>
+    <rect x="150" y="284" width="164" height="1.5" fill="#8d8471"/>
+  </g>
+
+  <g opacity="0.28">
+    <rect x="150" y="352" width="120" height="120" rx="14" fill="none" stroke="#b5644d" stroke-width="1.6"/>
+    <circle cx="392" cy="412" r="60" fill="none" stroke="#71765b" stroke-width="1.6"/>
+    <path d="M 150 560 L 270 560 L 270 640 L 150 640 Z" fill="none" stroke="#b5644d" stroke-width="1.6"/>
+  </g>
+
+  <rect width="1440" height="900" filter="url(#grain)" opacity="0.05"/>
+</svg>
