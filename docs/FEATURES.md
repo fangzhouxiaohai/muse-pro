@@ -1,130 +1,116 @@
 # 功能说明
 
-本文记录 Muse Pro 已实现的功能、交互路径与实现位置。所有界面文案为简体中文，不含表情符号。
+本文记录天琴 Lyra 0.2.0 已实现的功能、交互路径与实现位置。对标 Meta Muse（2026-09 发布的个人 AI 智能体）的核心体验，所有界面文案为简体中文，不含表情符号。
 
-## 一、对话工作台
+## 一、对话式智能体
 
-### 对话与流式回复
+### 多轮工具循环
 
-- 主界面是对话视图，欢迎页展示品牌插图、标题「今天想推进什么」与四条建议提示。
-- 发送消息后助手回复以流式方式逐字出现；回复生成期间显示三点等待动画，可随时点击停止按钮中断。
-- 消息区展示角色、时间与正文；用户消息带浅色气泡，系统消息带左侧竖线。
+- 发送消息后，天琴按「模型输出 → 执行工具 → 结果回喂 → 继续」的循环推进，最多 6 轮，直到给出不再调用工具的最终回答。
+- 每一轮的流式文本实时替换显示；工具执行以步骤流（进行中 / 已完成 / 等待中 / 失败）展示在消息内。
+- 生成期间可随时点击停止按钮中断；中断后已有的步骤与文本保留。
 
-实现位置：`src/components/ChatView.tsx`、`src/ai.ts` 的 `streamCompletion`。
+实现位置：`src/agent.ts` 的 `runAgent`、`src/App.tsx` 的 `send` 与 `executeTool`。
 
-### 思考步骤
+### 工具集（9 个）
 
-助手每次调用工具都会在消息内生成一条步骤记录，状态分为等待中、执行中、已完成、失败四种，界面以图标与中文状态标注，让用户看清楚工作台正在做什么。
-
-实现位置：`src/core.ts` 的 `Step`、`src/App.tsx` 的 `patchAssistant`。
-
-### 多会话
-
-- 侧栏列出所有会话，可新建、切换、搜索与删除；标题取自会话首条用户消息的前 24 个字。
-- 每个会话独立保存消息与审批记录；删除会话时同步清理属于它的待审批请求。
-- 工作台始终至少保留一个会话。
-
-实现位置：`src/core.ts` 的 `createSession`、`startSession`、`selectSession`、`removeSession`。
-
-## 二、任务与目标
-
-- 任务页与目标页共用同一套清单视图，包含进度环、全部与进行中与已完成三种过滤、内联备注编辑、删除。
-- 右侧上下文面板常驻展示最近的任务、目标与资料，并提供快速记录：选择任务或目标后一句话即可收进清单。
-- 清单项支持完成与撤销完成。
-
-实现位置：`src/components/ItemsView.tsx`、`src/components/ContextPanel.tsx`。
-
-## 三、资料工作区
-
-- 资料页展示资料卡片网格与右侧预览面板，预览最多显示两万字。
-- 桌面端可填写本机文件的绝对路径直接读取；网页端提示改用添加文件按钮。
-- 可以新建文本资料并保存进工作台，也可以把已有资料加入下一轮对话作为参考。
-- 单份文本上限 200 KB，超出时提示拆分。
-
-实现位置：`src/components/FilesView.tsx`、`src/App.tsx` 的 `pickFile` 与 `readPathIntoWorkspace`、`src/platform.ts`。
-
-## 四、浏览器与本地文件协作
-
-模型可请求四类操作，全部经由审批条执行：
-
-| 操作 | 桌面端行为 | 网页端行为 |
+| 工具 | 说明 | 是否需要审批 |
 | --- | --- | --- |
-| 打开外部网页 | 调用系统浏览器打开 | 新标签页打开 |
-| 读取网页内容 | 通过桌面端请求并提取正文 | 通过浏览器请求，受跨域策略约束 |
-| 读取本地文件 | 读取磁盘上的 UTF-8 文本文件 | 提示改用添加文件按钮 |
-| 写入本地文件 | 写入磁盘，父目录不存在时自动创建 | 只能更新工作台内已有资料 |
+| create_task | 创建任务，可挂到某个目标下 | 否 |
+| create_goal | 创建长期目标 | 否 |
+| propose_plan | 为目标生成 3-6 步执行计划 | 否 |
+| save_memory | 沉淀长期记忆（偏好、事实、承诺） | 否 |
+| create_artifact | 生成 Markdown 文档存入资料库 | 否 |
+| request_open_url | 在浏览器中打开外部网页 | 是 |
+| request_fetch_url | 读取网页正文作为参考 | 是 |
+| request_read_file | 读取本机文本文件 | 是 |
+| request_write_file | 写入本机文件 | 是 |
 
-读取网页正文时会去掉脚本与样式，压缩空白，最长保留四万字，超出部分标注已截断。
+实现位置：`src/ai.ts` 的 `controlTools`、`src/App.tsx` 的 `executeTool`。
 
-实现位置：`src/App.tsx` 的 `execute`、`src/ai.ts` 的 `fetchPage`、`src-tauri/src/lib.rs`。
+### 审批门（Sentinel）
 
-## 五、审批流
+- 四类外部操作默认逐条审批：天琴提出请求后对话挂起，等待你在审批条上「批准并执行」或「拒绝」；拒绝的结果会回喂给模型，它会接受结果并调整方案。
+- 在设置中可按类目切换为「自动批准」；自动批准的操作不再弹确认，但每一次执行（含参数与结果）仍完整记入审计。
+- 写入文件始终拒绝系统目录（Windows 的 SystemRoot / System32，macOS 的 /System、/Library、/private），单次内容上限 200 KB。
 
-- 打开网页、读取网页、读取文件、写入文件四类请求会先在聊天区顶部生成审批卡片，标注操作类型、目标、模型给出的原因。
-- 写入类请求可以展开预览将要写入的内容（最多显示四千字），确认无误后再批准。
-- 审批结果只有批准并执行与拒绝两种；批准后立即执行，成功写入审计，失败则记录失败原因。
-- 待审批数量会在侧栏的行动入口上显示徽标，切换会话后只显示当前会话的待审批请求。
-- 未经过审批，任何写文件、读文件、打开网页的动作都不会发生。
+实现位置：`src/core.ts` 的 `proposeAction` / `shouldAutoApprove`、`src/App.tsx` 的 `gate` 与 `resolveApproval`、`src-tauri/src/lib.rs` 的 `guard_target`。
 
-实现位置：`src/components/ApprovalBar.tsx`、`src/core.ts` 的 `proposeAction`、`approveAction`、`rejectAction`、`failAction`、`src/App.tsx` 的 `resolveApproval`。
+## 二、目标与计划
 
-## 六、审计记录
+- 目标页以卡片组织：标题、为什么做（why）、状态徽标（推进中 / 已暂停 / 已达成）、任务进度条（完成数 / 总数）。
+- 「让天琴制定计划」为当前目标生成 3-6 步可执行计划，每步含标题与说明；已有计划的目标可一键重新生成。
+- 任务勾选在目标卡内完成；未关联目标的任务集中在页面底部的独立任务区，支持内联添加。
+- 「围绕目标对话」把目标标题预填进输入框；创建、暂停、恢复、达成与删除都留有审计事件。
 
-- 审计页按时间倒序列出全部事件，可按事件类型过滤，每条记录包含标题、详情与时间。
-- 行动页按状态过滤审批记录（全部、等待确认、已批准、已拒绝、执行失败），并展示最近的行为事件。
-- 事件类型包括会话创建与移除、任务与目标的增删改、资料增删、审批请求、网页打开、网页读取、文件读取、文件写入、执行失败等。
-- 审计记录不写入接口密钥；单元测试覆盖了该约束。
+实现位置：`src/components/GoalsView.tsx`、`src/core.ts` 的 `createGoal` / `attachPlan` / `goalProgress`、`src/proactive.ts` 的 `generatePlan`。
 
-实现位置：`src/components/RecordViews.tsx`、`src/core.ts` 的 `ACTIONABLE_KINDS`、`src/format.ts` 的 `EVENT_LABEL`。
+## 三、想法与今日简报（主动建议）
 
-## 七、主题与响应式
+- 想法页顶部是「今日简报」：结合目标推进、待办、记忆与兴趣关键词生成一份不超过 300 字的简报，可随时刷新。
+- 「让天琴想想」基于工作台现状生成 2-4 条行动建议（JSON 宽松解析，容忍代码围栏）；每条可「采纳为任务」（自动创建任务）、「去聊聊」（预填对话）或忽略。
+- 提示词模板区提供 6 条常用指令，一键带入对话。
+- 兴趣关键词在设置中维护，简报与想法都会结合它们。
 
-- 亮色主题为暖色调：画布 `#f6f1e8`、侧栏 `#f0e9dc`、强调色 `#b5644d`；深色主题覆盖同名令牌。
-- 顶栏提供明暗切换，选择结果保存在本地。
-- 断点：1180px 隐藏右侧上下文面板；900px 收窄侧栏；768px 侧栏改为抽屉并显示菜单按钮；480px 进一步收紧间距。
-- 字体使用本地 DM Sans 可变字体，中文使用系统字体，界面不依赖外部字体服务。
+实现位置：`src/components/IdeasView.tsx`、`src/proactive.ts` 的 `generateSuggestions` / `generateBriefing`、`src/core.ts` 的 `addSuggestion` / `acceptSuggestion` / `setBriefing`。
 
-实现位置：`src/styles.css`、`src/App.tsx` 的主题状态。
+## 四、记忆
 
-## 八、桌面端外壳
+- 天琴在对话中通过 save_memory 自动沉淀长期信息（每轮最多两条）；重复内容自动去重。
+- 记忆页支持手动添加、置顶与逐条遗忘；置顶的记忆在每轮提示中最先注入，其余按最近优先（合计最多 12 条）。
+- 沉淀、置顶与遗忘都留有审计事件。
 
-- 窗口 1280x820，最小 420x560，居中启动，背景色与亮色主题一致。
-- 安全策略只允许自身资源、内联样式、本地字体与 http 与 https 请求，不加载外部脚本与字体。
-- 自定义命令：`read_text_file`、`write_text_file`、`file_exists`。写入时拒绝系统目录（Windows 的系统目录与 System32，macOS 的 /System、/Library、/private），父目录不存在时自动创建，路径为空或指向目录时给出中文提示。
-- 权限清单只保留核心能力、对话框、http 与打开链接，不授予通用文件系统权限。
+实现位置：`src/components/MemoryView.tsx`、`src/core.ts` 的 `saveMemory` / `forgetMemory` / `toggleMemoryPin` / `memoryContext`。
 
-实现位置：`src-tauri/src/lib.rs`、`src-tauri/tauri.conf.json`、`src-tauri/capabilities/default.json`、`src/platform.ts`。
+## 五、资料库
 
-## 九、测试
+- 本地文本资料与天琴生成的文档统一收纳，支持预览（最多 2 万字）、加入对话、新建文本、删除。
+- 桌面端可填写本机绝对路径直接读取；单文件上限 200 KB。
+- 为控制体积，仅保留最近 6 份资料的完整内容（各 2.4 万字），更早的只保留元信息。
 
-`src/core.test.ts` 覆盖六条关键约束：
+实现位置：`src/components/FilesView.tsx`、`src/core.ts` 的 `addFile` / `removeFile`、`src/platform.ts`。
 
-1. 待审批的操作不会直接变成已执行；
-2. 批准与拒绝分别留下可追溯记录；
-3. 未知审批编号不会改变工作台状态；
-4. 行为事件保留详情而不记录密钥；
-5. 切换会话后仍能更新原会话里的消息（流式回复不因切换会话丢失）；
-6. 新建会话时首条用户消息会成为标题。
+## 六、审计
 
-运行方式：`npm test`。
+- 时间线覆盖全部事件类型：任务 / 目标 / 计划 / 记忆 / 想法 / 简报 / 资料 / 网页 / 文件 / 审批 / 对话 / 设置 / 数据导入导出。
+- 顶部过滤（全部 / 行动记录 / 审批 / 对话）；待审批请求固定显示在页面顶部，可跨会话集中处理。
+- 记录保留事件类型、时间与目标（网页地址、文件路径），不存储接口密钥；最多保留 400 条。
 
-## 十、本地存储上限
+实现位置：`src/components/AuditView.tsx`、`src/core.ts` 的 `recordEvent` / `pendingApprovals`、`src/format.ts` 的 `EVENT_LABEL`。
 
-界面状态在每次变更后写入浏览器本地存储：最多保留 24 个会话（正在使用的会话始终保留）、每个会话最近 80 条消息、最近 6 份资料各保留前 2.4 万字，其余资料只保留名称与路径。超出上限的旧内容不再落盘，但仍留在当前会话的内存中。
+## 七、全局搜索
 
-## 十一、版本发布与联系方式
+- Ctrl+K（macOS 为 Cmd+K）打开全局搜索，一次覆盖：会话与消息、目标（含计划步骤）、任务、记忆、资料、审计事件。
+- 命中结果显示视图类型与上下文片段，点击直接跳转到对应页面（对话命中还会切换到对应会话）。
 
-Windows 安装包发布在仓库的 Releases 页面：[Releases](https://github.com/fangzhouxiaohai/muse-pro/releases)
+实现位置：`src/components/SearchDialog.tsx`、`src/core.ts` 的 `searchWorkspace`。
 
-| 发布文件 | 说明 |
-| --- | --- |
-| Muse-Pro-0.1.0-x64-setup.exe | NSIS 安装程序，安装时可切换简体中文与英文 |
-| Muse-Pro-0.1.0-x64-zh-CN.msi | 简体中文 MSI 安装包 |
-| Muse-Pro-0.1.0-x64-en-US.msi | 英文 MSI 安装包 |
+## 八、数据迁移与备份
 
-本地构建产物位于 `src-tauri/target/release`。上传到 Release 时把文件名中的空格替换为短横线，例如构建产物 `Muse Pro_0.1.0_x64-setup.exe` 对应发布资源 `Muse-Pro-0.1.0-x64-setup.exe`，这样直链可以稳定分享。
+- 首次启动自动检测旧版 Muse Pro（v0.1）数据并迁移：会话、任务、目标（转为新目标卡）、资料、审批与审计记录全部保留，旧目标备注转入「为什么做」。
+- 设置中可一键导出完整 JSON 备份（不含密钥），或导入备份恢复；导入会记入审计。
 
-联系方式：
+实现位置：`src/core.ts` 的 `migrateState` / `exportState` / `importState`、`src/App.tsx` 的 `exportWorkspace` / `importWorkspace`。
 
-- 邮箱：24519660@qq.com
-- 微信：扫描 `docs/assets/wechat-qr.jpg` 中的二维码添加
+## 九、设置
+
+- 模型接入：三个预置服务（深度求索 / 月之暗面 / 本地 Ollama）+ 自定义地址；接口地址校验（远程必须 https，仅本机允许 http）。
+- 操作权限：四类外部操作分别设置「每次询问 / 自动批准」。
+- 兴趣关键词：回车添加、点按移除，用于简报与想法生成。
+- 数据：导出 / 导入完整备份。
+- 关于：品牌标识、版本与隐私说明。
+- 接口地址、模型名称、权限与兴趣随工作台数据持久化；密钥只保存在当前会话内存中，永不落盘。
+
+实现位置：`src/components/SettingsDialog.tsx`、`src/core.ts` 的 `updateSettings` / `setPermission`。
+
+## 十、品牌与视觉
+
+- 应用标识：暗夜底色上的星座线里拉琴与织女星（`brand/lyra/mark.svg`），横版组合标识 `logo.svg`；全套应用图标由 `scripts/render-icon.mjs` 渲染源图后经 `tauri icon` 生成。
+- 欢迎页为 CSS 星空插画（无二进制资源）；界面沿用暖色纸感设计系统，新增目标 / 想法 / 记忆 / 搜索 / 设置等组件样式与深色主题适配。
+
+实现位置：`src/components/LyraMark.tsx`、`src/styles.css`、`brand/lyra/`、`scripts/render-icon.mjs`。
+
+## 兼容性说明
+
+- 桌面端标识从 `com.musepro.app` 变更为 `com.lyra.agent`，WebView 本地存储会重置一次；网页端的旧数据通过自动迁移保留。
+- 网页版功能受限：不能读写本机文件（写入会提示改用桌面版）、需要模型服务允许跨域。

@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react'
-import { ArrowUp, CircleCheck, CircleDashed, FileText, Loader, Square, X, Paperclip } from 'lucide-react'
+import { ArrowUp, CircleCheck, CircleDashed, FileText, Loader, Paperclip, Square, X } from 'lucide-react'
+import LyraMark from './LyraMark'
 import type { Session, StepState } from '../core'
 import { STEP_LABEL, clockTime } from '../format'
-import heroImage from '../assets/workspace-hero.jpg'
 
 type Props = {
   session: Session
@@ -15,14 +15,15 @@ type Props = {
   onPickFile: () => void
   onClearAttachment: () => void
   onRemoveFileAttachment: () => void
+  onOpenGoals: () => void
   empty: boolean
 }
 
 const SUGGESTIONS = [
-  '帮我把这周要推进的事情拆成可执行的任务',
-  '阅读这份资料，提炼出三个关键结论',
-  '根据我的目标，给出下周一整天的安排',
-  '把这个结果整理成一份文件保存到本地',
+  '我想在三个月内跑完半程马拉松，帮我制定一份计划',
+  '记住：我习惯早上写作，晚上复盘',
+  '根据我的目标，给出今天最值得推进的三件事',
+  '把这次讨论的结论整理成一份文档保存',
 ]
 
 function StepIcon({ state }: { state: StepState }) {
@@ -32,7 +33,7 @@ function StepIcon({ state }: { state: StepState }) {
   return <CircleDashed size={13} />
 }
 
-export default function ChatView({ session, thinking, draft, attachment, onDraft, onSend, onStop, onPickFile, onClearAttachment, onRemoveFileAttachment, empty }: Props) {
+export default function ChatView({ session, thinking, draft, attachment, onDraft, onSend, onStop, onPickFile, onClearAttachment, onRemoveFileAttachment, onOpenGoals, empty }: Props) {
   const scroller = useRef<HTMLDivElement>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
 
@@ -60,14 +61,17 @@ export default function ChatView({ session, thinking, draft, attachment, onDraft
       <div className="chat-scroll" ref={scroller}>
         {empty ? (
           <section className="welcome">
-            <img className="welcome-art" src={heroImage} alt="Muse Pro 工作台视觉" />
-            <h1>今天想推进什么</h1>
-            <p>把想法、资料和目标放在这里，工作台会记住上下文；涉及你设备与网络的操作，会先请你确认。</p>
+            <div className="welcome-sky" aria-hidden="true">
+              <div className="welcome-mark"><LyraMark size={92} /></div>
+            </div>
+            <h1>把目标交给天琴</h1>
+            <p>说出你想达成的事，天琴会制定计划、跟进任务、沉淀记忆；触及设备与网络的操作，都会先请你批准。</p>
             <div className="suggestion-grid">
               {SUGGESTIONS.map(text => (
                 <button key={text} className="suggestion" type="button" onClick={() => onDraft(text)}>{text}</button>
               ))}
             </div>
+            <button className="link-btn welcome-goal-link" type="button" onClick={onOpenGoals}>先看看目标页 →</button>
           </section>
         ) : null}
 
@@ -75,7 +79,7 @@ export default function ChatView({ session, thinking, draft, attachment, onDraft
           {session.messages.map(message => (
             <article key={message.id} className={`message ${message.role}`}>
               <header className="message-head">
-                <span className="message-role">{message.role === 'user' ? '你' : message.role === 'assistant' ? 'Muse Pro' : '系统'}</span>
+                <span className="message-role">{message.role === 'user' ? '你' : message.role === 'assistant' ? '天琴' : '系统'}</span>
                 <span className="message-time">{clockTime(message.createdAt)}</span>
               </header>
               {message.attachment ? (
@@ -103,8 +107,8 @@ export default function ChatView({ session, thinking, draft, attachment, onDraft
           {thinking ? (
             <article className="message assistant">
               <header className="message-head">
-                <span className="message-role">Muse Pro</span>
-                <span className="message-time">正在生成</span>
+                <span className="message-role">天琴</span>
+                <span className="message-time">正在推进</span>
               </header>
               <div className="typing"><span /><span /><span /></div>
             </article>
@@ -127,7 +131,7 @@ export default function ChatView({ session, thinking, draft, attachment, onDraft
             ref={textarea}
             value={draft}
             rows={1}
-            placeholder="描述你要推进的事，Enter 发送，Shift 加 Enter 换行"
+            placeholder="告诉天琴你想推进什么，Enter 发送，Shift 加 Enter 换行"
             onChange={event => onDraft(event.target.value)}
             onKeyDown={handleKey}
           />
@@ -139,7 +143,7 @@ export default function ChatView({ session, thinking, draft, attachment, onDraft
             </button>
           )}
         </div>
-        <p className="composer-hint">打开网页、读取或写入本机文件的操作，会先出现在上方的审批条中等待你确认。</p>
+        <p className="composer-hint">打开网页、读取或写入本机文件会先请你批准；计划与记忆会同步到「目标」和「记忆」页。</p>
       </div>
     </div>
   )

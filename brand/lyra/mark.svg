@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- 天琴 Lyra 应用图标：暗夜底色上的星座线里拉琴，琴顶织女星 -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2b2d58"/>
+      <stop offset="0.55" stop-color="#1d1e3e"/>
+      <stop offset="1" stop-color="#131330"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.3" r="0.62">
+      <stop offset="0" stop-color="#f7cf8b" stop-opacity="0.28"/>
+      <stop offset="0.55" stop-color="#f7cf8b" stop-opacity="0.07"/>
+      <stop offset="1" stop-color="#f7cf8b" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="gold" gradientUnits="userSpaceOnUse" x1="0" y1="412" x2="0" y2="768">
+      <stop offset="0" stop-color="#ffe9c2"/>
+      <stop offset="1" stop-color="#eec489"/>
+    </linearGradient>
+    <linearGradient id="star" gradientUnits="userSpaceOnUse" x1="0" y1="156" x2="0" y2="384">
+      <stop offset="0" stop-color="#fff6df"/>
+      <stop offset="1" stop-color="#f5c977"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="1024" height="1024" rx="232" fill="url(#tile)"/>
+  <rect x="0" y="0" width="1024" height="1024" rx="232" fill="url(#halo)"/>
+
+  <!-- 织女星：四芒星 -->
+  <path d="M512 156
+           C522 232 546 258 622 270
+           C546 282 522 308 512 384
+           C502 308 478 282 402 270
+           C478 258 502 232 512 156 Z" fill="url(#star)"/>
+  <!-- 缀星 -->
+  <circle cx="684" cy="216" r="9" fill="#f3d9a8" opacity="0.9"/>
+  <circle cx="352" cy="250" r="7" fill="#f3d9a8" opacity="0.75"/>
+  <circle cx="742" cy="330" r="6" fill="#f3d9a8" opacity="0.55"/>
+  <circle cx="286" cy="352" r="5" fill="#f3d9a8" opacity="0.5"/>
+
+  <!-- 里拉琴：双弧臂 + 琴轭 + 四弦 + 琴箱 -->
+  <g fill="none" stroke="url(#gold)" stroke-linecap="round">
+    <path d="M446 714 C330 636 318 478 404 424" stroke-width="27"/>
+    <path d="M578 714 C694 636 706 478 620 424" stroke-width="27"/>
+    <path d="M394 418 H630" stroke-width="25"/>
+    <path d="M454 436 V696" stroke-width="11" opacity="0.92"/>
+    <path d="M493 436 V696" stroke-width="11"/>
+    <path d="M531 436 V696" stroke-width="11"/>
+    <path d="M570 436 V696" stroke-width="11" opacity="0.92"/>
+  </g>
+  <rect x="424" y="704" width="176" height="58" rx="29" fill="url(#gold)"/>
+</svg>

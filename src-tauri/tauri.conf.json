@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Muse Pro",
-  "version": "0.1.0",
-  "identifier": "com.musepro.app",
+  "productName": "Lyra",
+  "version": "0.2.0",
+  "identifier": "com.lyra.agent",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Muse Pro",
+        "title": "天琴 Lyra — 你的私人智能体",
         "width": 1280,
         "height": 820,
         "minWidth": 420,
@@ -28,8 +28,8 @@
   "bundle": {
     "active": true,
     "category": "Productivity",
-    "shortDescription": "个人 AI 工作台",
-    "longDescription": "Muse Pro 是一个本地优先的个人 AI 工作台，把对话、任务、目标、资料与需要审批的操作收拢在同一个空间里。",
+    "shortDescription": "天琴 Lyra 个人 AI 智能体",
+    "longDescription": "天琴 Lyra 是一个本地优先的个人 AI 智能体：把目标变成计划、持续跟进任务、沉淀记忆，主动提出想法；所有触及设备与网络的操作都经过审批，全程留有审计痕迹。",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -42,13 +42,18 @@
     },
     "windows": {
       "wix": {
-        "language": ["zh-CN", "en-US"]
+        "language": [
+          "zh-CN",
+          "en-US"
+        ]
       },
       "nsis": {
         "installMode": "currentUser",
-        "languages": ["SimpChinese", "English"]
+        "languages": [
+          "SimpChinese",
+          "English"
+        ]
       }
     }
   }
 }
-

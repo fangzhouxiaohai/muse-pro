@@ -1,14 +1,22 @@
-import type { EventKind, FileKind, StepState } from './core'
+import type { EventKind, FileKind, GoalStatus, PermissionMode, SuggestionStatus, StepState } from './core'
 
 export const EVENT_LABEL: Record<EventKind, string> = {
   task_created: '新建任务',
   task_updated: '更新任务',
   task_removed: '删除任务',
-  goal_created: '新建目标',
+  goal_created: '创建目标',
   goal_updated: '更新目标',
   goal_removed: '删除目标',
-  file_added: '文件入库',
-  file_removed: '文件移除',
+  goal_plan_created: '生成计划',
+  memory_saved: '记忆沉淀',
+  memory_forgotten: '遗忘记忆',
+  suggestion_created: '产生想法',
+  suggestion_accepted: '采纳想法',
+  suggestion_dismissed: '搁置想法',
+  briefing_generated: '生成简报',
+  artifact_created: '生成文档',
+  file_added: '资料入库',
+  file_removed: '资料移除',
   url_opened: '打开网页',
   url_fetched: '读取网页',
   file_read: '读取文件',
@@ -22,6 +30,9 @@ export const EVENT_LABEL: Record<EventKind, string> = {
   response_received: '模型回复',
   session_created: '新建对话',
   session_removed: '移除对话',
+  settings_updated: '更新设置',
+  data_imported: '导入数据',
+  data_exported: '导出数据',
 }
 
 export const FILE_LABEL: Record<FileKind, string> = {
@@ -31,6 +42,23 @@ export const FILE_LABEL: Record<FileKind, string> = {
   csv: '表格',
   code: '代码',
   html: '网页',
+}
+
+export const GOAL_STATUS_LABEL: Record<GoalStatus, string> = {
+  active: '推进中',
+  paused: '已暂停',
+  achieved: '已达成',
+}
+
+export const SUGGESTION_LABEL: Record<SuggestionStatus, string> = {
+  new: '待处理',
+  accepted: '已采纳',
+  dismissed: '已搁置',
+}
+
+export const PERMISSION_LABEL: Record<PermissionMode, string> = {
+  ask: '每次询问',
+  auto: '自动批准',
 }
 
 export const STEP_LABEL: Record<StepState, string> = {
@@ -60,3 +88,5 @@ export function initialOf(title: string): string {
   const trimmed = title.trim()
   return trimmed ? trimmed.slice(0, 1) : '新'
 }
+
+export { relativeTime } from './core'

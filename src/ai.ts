@@ -1,17 +1,42 @@
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 import { isTauri } from '@tauri-apps/api/core'
-import type { Message } from './core'
 
 export type ModelSettings = { endpoint: string; model: string; apiKey: string }
 export type ToolCall = { id: string; name: string; arguments: string }
+
+/** 发给模型的有线消息格式（含工具回传轮次） */
+export type WireMessage =
+  | { role: 'system' | 'user'; content: string }
+  | { role: 'assistant'; content: string | null; tool_calls?: { id: string; type: 'function'; function: { name: string; arguments: string } }[] }
+  | { role: 'tool'; tool_call_id: string; content: string }
+
 export type StreamEvent =
   | { type: 'text'; value: string }
   | { type: 'calls'; value: ToolCall[] }
 
 export type RunContext = {
-  tasks: { title: string; done: boolean }[]
-  goals: { title: string; done: boolean }[]
+  goals: { title: string; status: string; planSteps: number; openTasks: number }[]
+  tasks: { title: string; done: boolean; goal?: string }[]
+  memories: string[]
   fileNames: string[]
+  interests: string[]
+  briefing?: string
+}
+
+export const TOOL_LABEL: Record<string, string> = {
+  create_task: '记录任务',
+  create_goal: '记录目标',
+  propose_plan: '制定计划',
+  save_memory: '沉淀记忆',
+  create_artifact: '生成文档',
+  request_open_url: '打开网页',
+  request_fetch_url: '读取网页',
+  request_read_file: '读取文件',
+  request_write_file: '写入文件',
+}
+
+export function toolLabel(name: string): string {
+  return TOOL_LABEL[name] ?? '执行指令'
 }
 
 export const controlTools = [
@@ -19,10 +44,13 @@ export const controlTools = [
     type: 'function',
     function: {
       name: 'create_task',
-      description: '在工作台的任务清单中新增一条任务。',
+      description: '在任务清单中新增一条待办任务，可挂在某个目标下。',
       parameters: {
         type: 'object',
-        properties: { title: { type: 'string', description: '任务标题，一句话说明要推进的事项' } },
+        properties: {
+          title: { type: 'string', description: '任务标题，一句话说明要推进的事项' },
+          goal_title: { type: 'string', description: '可选。关联目标的标题；不确定时可省略' },
+        },
         required: ['title'],
       },
     },
@@ -31,11 +59,70 @@ export const controlTools = [
     type: 'function',
     function: {
       name: 'create_goal',
-      description: '在工作台的目标清单中新增一条长期目标。',
+      description: '新增一个长期目标。当用户表达出想达成的事情时使用。',
       parameters: {
         type: 'object',
-        properties: { title: { type: 'string', description: '目标标题' } },
+        properties: {
+          title: { type: 'string', description: '目标标题' },
+          why: { type: 'string', description: '可选。为什么重要或期望的结果' },
+        },
         required: ['title'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'propose_plan',
+      description: '为某个目标制定分步执行计划，会替换该目标原有的计划。',
+      parameters: {
+        type: 'object',
+        properties: {
+          goal_title: { type: 'string', description: '目标的标题' },
+          steps: {
+            type: 'array',
+            description: '3 到 6 个步骤，按推进顺序排列',
+            items: {
+              type: 'object',
+              properties: {
+                title: { type: 'string', description: '这一步要完成什么，用动词开头' },
+                detail: { type: 'string', description: '可选。怎么做、标准或截止时间' },
+              },
+              required: ['title'],
+            },
+          },
+          note: { type: 'string', description: '可选。整体思路或前提假设' },
+        },
+        required: ['goal_title', 'steps'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'save_memory',
+      description: '把一条长期有效的信息存入记忆：用户的偏好、背景事实、长期承诺。不要保存一次性或临时信息。',
+      parameters: {
+        type: 'object',
+        properties: {
+          content: { type: 'string', description: '一句简短、自包含的陈述' },
+        },
+        required: ['content'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_artifact',
+      description: '把整理好的成果保存为 Markdown 文档，放进资料库。',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: '文档名，以 .md 结尾' },
+          content: { type: 'string', description: '完整的 Markdown 内容' },
+        },
+        required: ['name', 'content'],
       },
     },
   },
@@ -93,20 +180,33 @@ export const controlTools = [
   },
 ]
 
-const SYSTEM_PROMPT = [
-  '你是运行在用户本机工作台上的助手，服务于一个人的日常推进：梳理信息、拆解目标、跟进任务、整理资料。',
-  '回答使用简体中文，直接给结论和下一步，不要复述用户的话，不要使用表情符号。',
-  '你可以调用工具来新增任务和目标，或者提出打开网页、读取网页、读取文件、写入文件的请求。这些请求都必须由用户审批之后才会真正执行。',
-  '不要声称已经完成尚未执行的操作。如果一件事需要用户审批，说明你提出了请求并等待确认。',
-  '当用户提供的资料足够时，直接给出整理后的结果。当信息不足时，先问一个最关键的问题。',
+const PERSONA = [
+  '你是天琴（Lyra），运行在用户本机的私人 AI 智能体。你的职责不是陪聊，而是替用户把事情推进落地：理解目标、制定计划、跟进任务、整理资料、沉淀重要信息。',
+  '回答使用简体中文，直接给结论和下一步，不复述用户的话，不使用表情符号。',
+  '当用户表达一个想达成的目标时：先用 create_goal 记录目标，再用 propose_plan 给出 3 到 6 步可执行的计划，每一步以动词开头、有明确产出。',
+  '当用户透露长期有效的偏好、背景事实或承诺时，调用 save_memory 保存一句简短、自包含的陈述；一次对话里最多保存两条，不要保存临时信息。',
+  '当用户需要一份整理好的成果文档时，调用 create_artifact 保存为 Markdown。',
+  '打开网页、读取网页、读取文件、写入文件都必须提出请求并等待用户审批。你会在下一轮收到执行结果；如果用户拒绝了，接受这个结果并调整方案，不要重复提出同样的请求。',
+  '不要声称已经完成尚未执行的操作。信息不足时，先问最关键的一个问题，一次只问一个。',
 ].join('\n')
 
 export function describeContext(context: RunContext): string {
   const lines: string[] = ['当前工作台状态：']
-  lines.push(context.tasks.length ? `任务：${context.tasks.map(item => `${item.title}${item.done ? '（已完成）' : ''}`).join('；')}` : '任务：暂无')
-  lines.push(context.goals.length ? `目标：${context.goals.map(item => `${item.title}${item.done ? '（已完成）' : ''}`).join('；')}` : '目标：暂无')
-  lines.push(context.fileNames.length ? `已加入工作台的文件：${context.fileNames.join('；')}` : '已加入工作台的文件：暂无')
+  lines.push(context.goals.length
+    ? context.goals.map(goal => `目标：${goal.title}（${goal.status}，计划 ${goal.planSteps} 步，待办 ${goal.openTasks}）`).join('\n')
+    : '目标：暂无')
+  lines.push(context.tasks.length
+    ? `任务：${context.tasks.slice(0, 20).map(task => `${task.title}${task.goal ? `〔${task.goal}〕` : ''}${task.done ? '（已完成）' : ''}`).join('；')}${context.tasks.length > 20 ? ` 等共 ${context.tasks.length} 项` : ''}`
+    : '任务：暂无')
+  lines.push(context.memories.length ? `已记住：${context.memories.join('；')}` : '已记住：暂无')
+  lines.push(context.fileNames.length ? `资料库文件：${context.fileNames.join('；')}` : '资料库文件：暂无')
+  if (context.interests.length) lines.push(`用户关注的领域：${context.interests.join('、')}`)
+  if (context.briefing) lines.push(`上一份简报：${context.briefing.slice(0, 200)}`)
   return lines.join('\n')
+}
+
+export function buildSystemPrompt(context: RunContext): string {
+  return `${PERSONA}\n\n${describeContext(context)}`
 }
 
 function validateEndpoint(endpoint: string): URL {
@@ -116,10 +216,11 @@ function validateEndpoint(endpoint: string): URL {
   return url
 }
 
-export async function streamCompletion(
+/** 调用对话接口：流式回传文本，结束时回传完整的工具调用列表 */
+export async function chatCompletion(
   settings: ModelSettings,
-  messages: Message[],
-  context: RunContext,
+  wire: WireMessage[],
+  tools: typeof controlTools | [],
   onEvent: (event: StreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -130,18 +231,7 @@ export async function streamCompletion(
     method: 'POST',
     signal,
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.apiKey}` },
-    body: JSON.stringify({
-      model: settings.model,
-      stream: true,
-      messages: [
-        { role: 'system', content: `${SYSTEM_PROMPT}\n\n${describeContext(context)}` },
-        ...messages.slice(-24).map(message => ({
-          role: message.role === 'system' ? 'user' : message.role,
-          content: message.content,
-        })),
-      ],
-      tools: controlTools,
-    }),
+    body: JSON.stringify({ model: settings.model, stream: true, messages: wire, tools: tools.length ? tools : undefined }),
   })
   if (!response.ok) {
     const text = await response.text().catch(() => '')
@@ -149,9 +239,12 @@ export async function streamCompletion(
   }
   if (!response.body) {
     const text = await response.text()
-    const payload = safeJson<{ choices?: { message?: { content?: string } }[] }>(text)
-    const content = payload?.choices?.[0]?.message?.content
-    if (content) onEvent({ type: 'text', value: content })
+    const payload = safeJson<{ choices?: { message?: { content?: string; tool_calls?: { id: string; function: { name: string; arguments: string } }[] } }[] }>(text)
+    const message = payload?.choices?.[0]?.message
+    if (message?.content) onEvent({ type: 'text', value: message.content })
+    if (message?.tool_calls?.length) {
+      onEvent({ type: 'calls', value: message.tool_calls.map((call, index) => ({ id: call.id ?? `call_${index}`, name: call.function.name, arguments: call.function.arguments })) })
+    }
     return
   }
   await readStream(response.body, onEvent, signal)

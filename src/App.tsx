@@ -1,78 +1,109 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { openUrl } from '@tauri-apps/plugin-opener'
-import { PanelLeft, Sparkles } from 'lucide-react'
+import { PanelLeft, Search, Sparkles } from 'lucide-react'
 import {
+  acceptSuggestion,
   activeApprovals,
   activeSession,
   addFile,
+  addSuggestion,
   appendMessage,
   approveAction,
+  attachPlan,
+  createGoal,
   createInitialState,
-  createItem,
+  createTask,
   describeWorkspace,
+  dismissSuggestion,
+  exportState,
   failAction,
+  findGoalByTitle,
   finishAction,
+  forgetMemory,
+  goalProgress,
+  importState,
+  memoryContext,
+  migrateState,
+  proposeAction,
   rejectAction,
   removeFile,
-  removeItem,
+  removeGoal,
   removeSession,
+  removeTask,
+  saveMemory,
   selectSession,
+  setBriefing,
+  setPermission,
+  shouldAutoApprove,
   startSession,
-  toggleItem,
-  updateItem,
+  toggleMemoryPin,
+  toggleTask,
+  updateGoal,
   updateMessage,
-  type Approval,
+  updateSettings,
+  type ActionKind,
+  type AgentSettings,
   type ApprovalDraft,
+  type GoalStatus,
   type Message,
-  type ModelSettings,
+  type PlanStep,
+  type SearchHit,
   type Step,
+  type StepState,
   type View,
   type WorkspaceFile,
   type WorkspaceState,
 } from './core'
-import { fetchPage, streamCompletion, type RunContext, type ToolCall } from './ai'
+import { buildSystemPrompt, fetchPage, toolLabel, type ModelSettings, type RunContext, type ToolCall, type WireMessage } from './ai'
+import { runAgent } from './agent'
+import { generateBriefing, generatePlan, generateSuggestions } from './proactive'
 import { MAX_TEXT_FILE, hasNativeFileAccess, platformLabel, readTextPath, writeTextPath } from './platform'
+import { GOAL_STATUS_LABEL } from './format'
 import Sidebar from './components/Sidebar'
 import ChatView from './components/ChatView'
-import ContextPanel from './components/ContextPanel'
+import GoalsView from './components/GoalsView'
+import IdeasView from './components/IdeasView'
+import MemoryView from './components/MemoryView'
+import FilesView from './components/FilesView'
+import AuditView from './components/AuditView'
 import ApprovalBar from './components/ApprovalBar'
 import SettingsDialog from './components/SettingsDialog'
-import ItemsView from './components/ItemsView'
-import FilesView from './components/FilesView'
-import { ActionsView, AuditView } from './components/RecordViews'
+import SearchDialog from './components/SearchDialog'
 
-const WORKSPACE_KEY = 'muse-pro-workspace-v2'
-const THEME_KEY = 'muse-pro-theme-v1'
-const FILE_LIMIT = 6
-const MESSAGE_LIMIT = 80
+const WORKSPACE_KEY = 'lyra-workspace-v1'
+const LEGACY_KEY = 'muse-pro-workspace-v2'
+const THEME_KEY = 'lyra-theme-v1'
 const SESSION_LIMIT = 24
+const MESSAGE_LIMIT = 80
+const FILE_LIMIT = 6
 
 type Persisted = { state: WorkspaceState; theme: 'light' | 'dark' }
 
 function restore(): Persisted | null {
   try {
     const raw = localStorage.getItem(WORKSPACE_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as Persisted
-    if (!parsed?.state?.sessions?.length) return null
-    return parsed
-  } catch {
-    return null
-  }
+    if (raw) {
+      const parsed = JSON.parse(raw) as Persisted
+      if (parsed?.state) return { state: migrateState(parsed.state), theme: parsed.theme === 'dark' ? 'dark' : 'light' }
+    }
+  } catch { /* 继续尝试旧数据 */ }
+  try {
+    const legacy = localStorage.getItem(LEGACY_KEY)
+    if (legacy) {
+      const parsed = JSON.parse(legacy) as { state?: unknown; theme?: string }
+      if (parsed?.state) return { state: migrateState(parsed.state), theme: parsed.theme === 'dark' ? 'dark' : 'light' }
+    }
+  } catch { /* 无法恢复时从空白开始 */ }
+  return null
 }
 
-function slimState(state: WorkspaceState): WorkspaceState {
-  const sessions = state.sessions.slice(-SESSION_LIMIT)
-  const active = state.sessions.find(item => item.id === state.activeSessionId)
-  if (active && !sessions.includes(active)) sessions[0] = active
+function slimState(input: WorkspaceState): WorkspaceState {
   return {
-    ...state,
-    sessions: sessions.map(session => ({ ...session, messages: session.messages.slice(-MESSAGE_LIMIT) })),
-    files: state.files.map((file, index, all) => ({
-      ...file,
-      content: index >= all.length - FILE_LIMIT ? file.content.slice(0, 24_000) : '',
-    })),
+    ...input,
+    sessions: input.sessions.slice(-SESSION_LIMIT).map(session => ({ ...session, messages: session.messages.slice(-MESSAGE_LIMIT) })),
+    files: input.files.map((file, index, all) => ({ ...file, content: index >= all.length - FILE_LIMIT ? file.content.slice(0, 24_000) : '' })),
+    audit: input.audit.slice(-400),
   }
 }
 
@@ -80,47 +111,71 @@ function persist(state: WorkspaceState, theme: 'light' | 'dark') {
   try {
     localStorage.setItem(WORKSPACE_KEY, JSON.stringify({ state: slimState(state), theme }))
     localStorage.setItem(THEME_KEY, theme)
-  } catch {
-    /* 存储空间不足时保持内存中的状态不变 */
+  } catch { /* 存储空间不足时保持内存中的状态不变 */ }
+}
+
+function findMessage(state: WorkspaceState, id: string): Message | undefined {
+  for (const session of state.sessions) {
+    const found = session.messages.find(message => message.id === id)
+    if (found) return found
   }
+  return undefined
 }
 
-function stepId() {
-  return `step_${Math.random().toString(36).slice(2, 10)}`
+const VIEW_TITLE: Record<Exclude<View, 'chat'>, string> = {
+  goals: '目标',
+  ideas: '想法',
+  memory: '记忆',
+  files: '资料库',
+  audit: '审计',
 }
 
-function titleFor(name: string): string {
-  if (name === 'create_task') return '记录任务'
-  if (name === 'create_goal') return '记录目标'
-  if (name.includes('fetch')) return '读取网页'
-  if (name.includes('read_file')) return '读取文件'
-  if (name.includes('write_file')) return '写入文件'
-  return '打开网页'
-}
+const PERMISSION_KINDS: ActionKind[] = ['open_url', 'fetch_url', 'read_file', 'write_file']
 
 export default function App() {
   const boot = useMemo(restore, [])
   const [state, setState] = useState<WorkspaceState>(() => boot?.state ?? createInitialState())
   const [theme, setTheme] = useState<'light' | 'dark'>(() => boot?.theme ?? 'light')
   const [view, setView] = useState<View>('chat')
-  const [settings, setSettings] = useState<ModelSettings>({ endpoint: 'https://api.deepseek.com/v1/chat/completions', model: 'deepseek-chat', apiKey: '' })
+  const [apiKey, setApiKey] = useState('')
   const [draft, setDraft] = useState('')
   const [attachment, setAttachment] = useState<{ name: string; content: string } | null>(null)
-  const [thinking, setThinking] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [planningId, setPlanningId] = useState<string | null>(null)
+  const [ideasBusy, setIdeasBusy] = useState(false)
+  const [briefingBusy, setBriefingBusy] = useState(false)
+  const [fileBusy, setFileBusy] = useState(false)
   const [toast, setToast] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [busy, setBusy] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
+  const ideasAbortRef = useRef<AbortController | null>(null)
+  const briefingAbortRef = useRef<AbortController | null>(null)
+  const planAbortRef = useRef<AbortController | null>(null)
+  const waitersRef = useRef(new Map<string, (result: string | null) => void>())
+
+  const stateRef = useRef(state)
+  useEffect(() => { stateRef.current = state }, [state])
 
   useEffect(() => { document.documentElement.dataset.theme = theme }, [theme])
   useEffect(() => { persist(state, theme) }, [state, theme])
-
   useEffect(() => {
     if (!toast) return
     const timer = window.setTimeout(() => setToast(''), 4200)
     return () => window.clearTimeout(timer)
   }, [toast])
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setSearchOpen(open => !open)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   const session = activeSession(state)
   const pending = activeApprovals(state)
@@ -128,26 +183,349 @@ export default function App() {
 
   const notify = useCallback((message: string) => setToast(message), [])
 
-  const commit = useCallback((message: string, updater: (current: WorkspaceState) => WorkspaceState) => {
-    setState(current => updater(current))
-    if (message) notify(message)
-  }, [notify])
+  const model = useMemo<ModelSettings>(() => ({
+    endpoint: state.settings.endpoint,
+    model: state.settings.model,
+    apiKey,
+  }), [apiKey, state.settings.endpoint, state.settings.model])
 
-  const toggleTheme = useCallback(() => {
-    setTheme(current => current === 'light' ? 'dark' : 'light')
+  const runContext = useCallback((): RunContext => {
+    const current = stateRef.current
+    return {
+      goals: current.goals.map(goal => {
+        const progress = goalProgress(current, goal.id)
+        return { title: goal.title, status: GOAL_STATUS_LABEL[goal.status], planSteps: goal.plan.length, openTasks: progress.total - progress.done }
+      }),
+      tasks: current.tasks.slice(0, 40).map(task => ({
+        title: task.title,
+        done: task.done,
+        goal: task.goalId ? current.goals.find(item => item.id === task.goalId)?.title : undefined,
+      })),
+      memories: memoryContext(current),
+      fileNames: current.files.map(item => item.name),
+      interests: current.settings.interests,
+      briefing: current.briefing?.content,
+    }
   }, [])
 
-  const patchAssistant = useCallback((id: string, mutate: (steps: Step[]) => Step[]) => {
-    setState(current => {
-      let target: Message | undefined
-      for (const item of current.sessions) {
-        const found = item.messages.find(message => message.id === id)
-        if (found) { target = found; break }
+  /* ---------- 步骤与消息辅助 ---------- */
+
+  const addStep = useCallback((assistantId: string, label: string, stepState: StepState = 'running'): string => {
+    const stepId = `step_${crypto.randomUUID().slice(0, 8)}`
+    setState(current => updateMessage(current, assistantId, {
+      steps: [...(findMessage(current, assistantId)?.steps ?? []), { id: stepId, label, state: stepState }],
+    }))
+    return stepId
+  }, [])
+
+  const setStep = useCallback((assistantId: string, stepId: string, label: string, stepState: StepState) => {
+    setState(current => updateMessage(current, assistantId, {
+      steps: (findMessage(current, assistantId)?.steps ?? []).map(step => step.id === stepId ? { ...step, label, state: stepState } : step),
+    }))
+  }, [])
+
+  /* ---------- 外部操作执行 ---------- */
+
+  const finishKind = (type: ActionKind) =>
+    type === 'open_url' ? 'url_opened' as const
+      : type === 'fetch_url' ? 'url_fetched' as const
+        : type === 'read_file' ? 'file_read' as const
+          : 'file_written' as const
+
+  const executeRequest = useCallback(async (draft: ApprovalDraft): Promise<string> => {
+    if (draft.type === 'open_url') {
+      if (native) await openUrl(draft.target)
+      else window.open(draft.target, '_blank', 'noopener,noreferrer')
+      return `已在浏览器中打开 ${draft.target}`
+    }
+    if (draft.type === 'fetch_url') {
+      const page = await fetchPage(draft.target)
+      return `已读取《${page.title}》共 ${page.text.length} 字${page.truncated ? '（内容较长，已截断）' : ''}。正文如下：\n${page.text.slice(0, 6000)}`
+    }
+    if (draft.type === 'read_file') {
+      const content = await readTextPath(draft.target)
+      const name = draft.target.split(/[\\/]/).pop() ?? draft.target
+      setState(current => addFile(current, { name, path: draft.target, content, origin: '已选择' }))
+      return `已读取 ${name}（${content.length} 字）：\n${content.slice(0, 6000)}`
+    }
+    if (!native) {
+      const local = stateRef.current.files.find(item => item.path === draft.target || item.name === draft.target)
+      if (local) {
+        setState(current => addFile(current, { name: local.name, path: local.path, content: draft.content, origin: '模型写入' }))
+        return `已更新工作台内的 ${local.name}（${draft.content.length} 字）`
       }
-      if (!target) return current
-      return updateMessage(current, id, { steps: mutate(target.steps ?? []) })
+      throw new Error('网页版不能写入本机文件；可以让天琴把内容保存为资料库文档，或在桌面版中执行。')
+    }
+    const destination = await writeTextPath(draft.target, draft.content)
+    const name = destination.split(/[\\/]/).pop() ?? destination
+    setState(current => addFile(current, { name, path: destination, content: draft.content, origin: '模型写入' }))
+    return `已写入 ${name}（${draft.content.length} 字）`
+  }, [native])
+
+  const resolveApproval = useCallback(async (id: string, decision: 'approve' | 'reject') => {
+    const approval = stateRef.current.approvals.find(item => item.id === id && item.status === 'pending')
+    if (!approval) return
+    if (decision === 'reject') {
+      setState(current => rejectAction(current, id))
+      waitersRef.current.get(id)?.(null)
+      waitersRef.current.delete(id)
+      notify('已拒绝这次操作。')
+      return
+    }
+    setState(current => approveAction(current, id))
+    try {
+      const result = await executeRequest(approval)
+      setState(current => finishAction(current, id, finishKind(approval.type), '操作已执行', result))
+      waitersRef.current.get(id)?.(result)
+    } catch (cause) {
+      const reason = cause instanceof Error ? cause.message : '执行这个操作时出现了问题。'
+      setState(current => failAction(current, id, reason))
+      waitersRef.current.get(id)?.(`执行失败：${reason}`)
+    } finally {
+      waitersRef.current.delete(id)
+    }
+  }, [executeRequest, notify])
+
+  /** 审批门：自动批准直接执行，否则等待用户在审批条上裁决 */
+  const gate = useCallback(async (draft: ApprovalDraft, assistantId: string, label: string): Promise<string> => {
+    if (shouldAutoApprove(stateRef.current, draft.type)) {
+      const id = crypto.randomUUID()
+      setState(current => approveAction(proposeAction(current, draft, id), id))
+      const stepId = addStep(assistantId, `${label}：${draft.target}（自动批准）`)
+      try {
+        const result = await executeRequest(draft)
+        setState(current => finishAction(current, id, finishKind(draft.type), '操作已执行', result))
+        setStep(assistantId, stepId, `${label}：${draft.target}`, 'done')
+        return result
+      } catch (cause) {
+        const reason = cause instanceof Error ? cause.message : '执行失败'
+        setState(current => failAction(current, id, reason))
+        setStep(assistantId, stepId, `${label}：执行失败`, 'failed')
+        return `执行失败：${reason}`
+      }
+    }
+    const id = crypto.randomUUID()
+    setState(current => proposeAction(current, draft, id))
+    const stepId = addStep(assistantId, `${label}：${draft.target}（等待确认）`, 'pending')
+    const result = await new Promise<string | null>(resolve => { waitersRef.current.set(id, resolve) })
+    if (result === null) {
+      setStep(assistantId, stepId, `${label}：用户已拒绝`, 'failed')
+      return '用户拒绝了这次操作。请接受这个结果，调整方案或向用户说明情况。'
+    }
+    setStep(assistantId, stepId, `${label}：${draft.target}`, 'done')
+    return result
+  }, [addStep, executeRequest, setStep])
+
+  /* ---------- 工具执行 ---------- */
+
+  const executeTool = useCallback(async (call: ToolCall, assistantId: string): Promise<string> => {
+    let args: Record<string, unknown> = {}
+    try {
+      args = JSON.parse(call.arguments || '{}') as Record<string, unknown>
+    } catch {
+      addStep(assistantId, `${toolLabel(call.name)}（参数不完整）`, 'failed')
+      return '指令参数不是有效的 JSON，请重新调用。'
+    }
+    const stepId = addStep(assistantId, toolLabel(call.name))
+    const done = (label: string) => setStep(assistantId, stepId, label, 'done')
+    const fail = (label: string) => setStep(assistantId, stepId, label, 'failed')
+
+    switch (call.name) {
+      case 'create_task': {
+        const title = String(args.title ?? '').trim()
+        if (!title) { fail('记录任务：缺少标题'); return 'create_task 需要提供 title。' }
+        const goal = args.goal_title ? findGoalByTitle(stateRef.current, String(args.goal_title)) : undefined
+        setState(current => createTask(current, title, goal?.id ?? null))
+        done(`记录任务：${title}${goal ? `（目标：${goal.title}）` : ''}`)
+        return `已创建任务「${title}」${goal ? `，归属目标「${goal.title}」` : ''}`
+      }
+      case 'create_goal': {
+        const title = String(args.title ?? '').trim()
+        if (!title) { fail('记录目标：缺少标题'); return 'create_goal 需要提供 title。' }
+        setState(current => createGoal(current, title, String(args.why ?? '')))
+        done(`记录目标：${title}`)
+        return `已创建目标「${title}」`
+      }
+      case 'propose_plan': {
+        const goalTitle = String(args.goal_title ?? '').trim()
+        const goal = findGoalByTitle(stateRef.current, goalTitle)
+        if (!goal) { fail(`制定计划：未找到目标「${goalTitle}」`); return `没有找到目标「${goalTitle}」，可以先用 create_goal 创建。` }
+        const steps: PlanStep[] = Array.isArray(args.steps)
+          ? (args.steps as unknown[]).map(item => {
+              const record = (item ?? {}) as Record<string, unknown>
+              return { title: String(record.title ?? '').trim(), detail: String(record.detail ?? '') }
+            }).filter(step => step.title)
+          : []
+        if (!steps.length) { fail(`制定计划：${goal.title}（步骤为空）`); return '计划步骤为空，请提供 3 到 6 步。' }
+        setState(current => attachPlan(current, goal.id, steps, String(args.note ?? '')))
+        done(`为目标「${goal.title}」制定 ${steps.length} 步计划`)
+        return `已为目标「${goal.title}」生成 ${steps.length} 步计划`
+      }
+      case 'save_memory': {
+        const content = String(args.content ?? '').trim()
+        if (!content) { fail('沉淀记忆：缺少内容'); return 'save_memory 需要提供 content。' }
+        const existed = stateRef.current.memories.some(item => item.content === content)
+        setState(current => saveMemory(current, content))
+        done(`沉淀记忆：${content}`)
+        return existed ? '这条内容已经在记忆里了。' : `已记住：${content}`
+      }
+      case 'create_artifact': {
+        let name = String(args.name ?? '').trim() || '未命名文档.md'
+        if (!/\.(md|markdown|txt)$/i.test(name)) name = `${name}.md`
+        const content = String(args.content ?? '')
+        if (!content.trim()) { fail(`生成文档：${name}（内容为空）`); return 'create_artifact 需要提供完整的 content。' }
+        setState(current => addFile(current, { name, content, origin: '模型生成' }))
+        done(`生成文档：${name}`)
+        return `已生成文档「${name}」并放入资料库`
+      }
+      case 'request_open_url':
+      case 'request_fetch_url':
+      case 'request_read_file':
+      case 'request_write_file': {
+        const label = toolLabel(call.name)
+        if (call.name === 'request_write_file') {
+          const target = String(args.path ?? '').trim()
+          const content = String(args.content ?? '')
+          if (!target) { fail(`${label}：缺少路径`); return 'request_write_file 需要提供 path。' }
+          return await gate({ type: 'write_file', target, content, reason: String(args.reason ?? '') }, assistantId, label)
+        }
+        const target = String(args.url ?? args.path ?? '').trim()
+        if (!target) { fail(`${label}：缺少地址`); return `${call.name} 需要提供${call.name === 'request_read_file' ? ' path' : ' url'}。` }
+        const type: ActionKind = call.name === 'request_open_url' ? 'open_url' : call.name === 'request_fetch_url' ? 'fetch_url' : 'read_file'
+        return await gate({ type, target, reason: String(args.reason ?? '') } as ApprovalDraft, assistantId, label)
+      }
+      default:
+        fail(`不支持的指令：${call.name}`)
+        return `不支持的指令：${call.name}`
+    }
+  }, [addStep, gate, setStep])
+
+  /* ---------- 对话主流程 ---------- */
+
+  const send = useCallback(async (override?: string) => {
+    const text = (override ?? draft).trim()
+    if (!text || busy) return
+    if (!apiKey.trim()) { setSettingsOpen(true); notify('请先在设置中填写接口密钥。'); return }
+
+    const file = attachment
+    const current = stateRef.current
+    const history: WireMessage[] = activeSession(current).messages
+      .filter(message => message.content.trim() && message.role !== 'system')
+      .slice(-23)
+      .map(message => ({ role: message.role as 'user' | 'assistant', content: message.content }))
+    history.push({ role: 'user', content: file ? `${text}\n\n参考资料：${file.name}\n${file.content.slice(0, 20_000)}` : text })
+
+    setDraft('')
+    setAttachment(null)
+    const assistantId = crypto.randomUUID()
+    setState(current => {
+      const appended = appendMessage(current, 'user', text, file?.name)
+      return {
+        ...appended,
+        sessions: appended.sessions.map(item => item.id === appended.activeSessionId
+          ? { ...item, messages: [...item.messages, { id: assistantId, role: 'assistant' as const, content: '', createdAt: new Date().toISOString(), steps: [] as Step[] }] }
+          : item),
+      }
     })
+
+    setBusy(true)
+    const controller = new AbortController()
+    abortRef.current = controller
+    try {
+      const finalText = await runAgent({
+        settings: model,
+        systemPrompt: buildSystemPrompt(runContext()),
+        history,
+        execute: call => executeTool(call, assistantId),
+        onText: roundText => setState(current => updateMessage(current, assistantId, { content: roundText })),
+        onRoundStart: () => setState(current => updateMessage(current, assistantId, { content: '' })),
+        signal: controller.signal,
+      })
+      setState(current => updateMessage(current, assistantId, { content: finalText || '这一轮没有新的输出。需要我继续推进什么？' }))
+    } catch (cause) {
+      const aborted = cause instanceof DOMException && cause.name === 'AbortError'
+      const reason = cause instanceof Error ? cause.message : '生成过程中出现了问题。'
+      if (aborted) {
+        if (!findMessage(stateRef.current, assistantId)?.content.trim()) {
+          setState(current => updateMessage(current, assistantId, { content: '已停止生成。' }))
+        }
+      } else {
+        notify(reason)
+      }
+    } finally {
+      setBusy(false)
+      abortRef.current = null
+    }
+  }, [apiKey, attachment, busy, draft, executeTool, model, notify, runContext])
+
+  const stop = useCallback(() => {
+    abortRef.current?.abort()
+    setBusy(false)
   }, [])
+
+  /* ---------- 主动生成：计划 / 想法 / 简报 ---------- */
+
+  const planFor = useCallback(async (goalId: string) => {
+    if (!apiKey.trim()) { setSettingsOpen(true); notify('请先在设置中填写接口密钥。'); return }
+    const goal = stateRef.current.goals.find(item => item.id === goalId)
+    if (!goal) return
+    setPlanningId(goalId)
+    const controller = new AbortController()
+    planAbortRef.current = controller
+    try {
+      const steps = await generatePlan(model, { title: goal.title, why: goal.why }, runContext(), controller.signal)
+      setState(current => attachPlan(current, goalId, steps))
+      notify(`已为目标「${goal.title}」生成 ${steps.length} 步计划`)
+    } catch (cause) {
+      if (!(cause instanceof DOMException && cause.name === 'AbortError')) {
+        notify(cause instanceof Error ? cause.message : '生成计划时出现了问题。')
+      }
+    } finally {
+      setPlanningId(null)
+      planAbortRef.current = null
+    }
+  }, [apiKey, model, notify, runContext])
+
+  const refreshIdeas = useCallback(async () => {
+    if (!apiKey.trim()) { setSettingsOpen(true); notify('请先在设置中填写接口密钥。'); return }
+    setIdeasBusy(true)
+    const controller = new AbortController()
+    ideasAbortRef.current = controller
+    try {
+      const drafts = await generateSuggestions(model, runContext(), controller.signal)
+      if (!drafts.length) { notify('天琴这次没有想出新的建议，稍后再试。'); return }
+      setState(current => drafts.reduce((acc, item) => addSuggestion(acc, item), current))
+      notify(`天琴想到了 ${drafts.length} 个新想法`)
+    } catch (cause) {
+      if (!(cause instanceof DOMException && cause.name === 'AbortError')) {
+        notify(cause instanceof Error ? cause.message : '生成想法时出现了问题。')
+      }
+    } finally {
+      setIdeasBusy(false)
+      ideasAbortRef.current = null
+    }
+  }, [apiKey, model, notify, runContext])
+
+  const refreshBriefing = useCallback(async () => {
+    if (!apiKey.trim()) { setSettingsOpen(true); notify('请先在设置中填写接口密钥。'); return }
+    setBriefingBusy(true)
+    const controller = new AbortController()
+    briefingAbortRef.current = controller
+    try {
+      const content = await generateBriefing(model, runContext(), controller.signal)
+      setState(current => setBriefing(current, content, current.settings.interests))
+      notify('简报已更新。')
+    } catch (cause) {
+      if (!(cause instanceof DOMException && cause.name === 'AbortError')) {
+        notify(cause instanceof Error ? cause.message : '生成简报时出现了问题。')
+      }
+    } finally {
+      setBriefingBusy(false)
+      briefingAbortRef.current = null
+    }
+  }, [apiKey, model, notify, runContext])
+
+  /* ---------- 文件 ---------- */
 
   const pickFile = useCallback(async () => {
     try {
@@ -178,188 +556,18 @@ export default function App() {
   }, [native, notify])
 
   const readPathIntoWorkspace = useCallback(async (path: string) => {
-    setBusy(true)
+    setFileBusy(true)
     try {
       const content = await readTextPath(path)
       const name = path.split(/[\\/]/).pop() ?? path
-      commit(`已加入 ${name}`, current => addFile(current, { name, path, content, origin: '已选择' }))
+      setState(current => addFile(current, { name, path, content, origin: '已选择' }))
+      notify(`已加入 ${name}`)
     } catch (cause) {
       notify(cause instanceof Error ? cause.message : '读取文件时出现了问题。')
     } finally {
-      setBusy(false)
+      setFileBusy(false)
     }
-  }, [commit, notify])
-
-  const execute = useCallback(async (approval: Approval) => {
-    if (approval.type === 'open_url') {
-      if (native) await openUrl(approval.target)
-      else window.open(approval.target, '_blank', 'noopener,noreferrer')
-      return `已在浏览器中打开 ${approval.target}`
-    }
-    if (approval.type === 'fetch_url') {
-      const page = await fetchPage(approval.target)
-      return `已读取《${page.title}》共 ${page.text.length} 字${page.truncated ? '（内容较长，已截断）' : ''}`
-    }
-    if (approval.type === 'read_file') {
-      const content = await readTextPath(approval.target)
-      const name = approval.target.split(/[\\/]/).pop() ?? approval.target
-      setState(current => addFile(current, { name, path: approval.target, content, origin: '已选择' }))
-      return `已读取 ${name}（${content.length} 字）`
-    }
-    if (!native) {
-      const local = state.files.find(item => item.path === approval.target || item.name === approval.target)
-      if (local) {
-        setState(current => addFile(current, { name: local.name, path: local.path, content: approval.content, origin: '模型写入' }))
-        return `已更新工作台内的 ${local.name}`
-      }
-    }
-    const destination = await writeTextPath(approval.target, approval.content)
-    const name = destination.split(/[\\/]/).pop() ?? destination
-    setState(current => addFile(current, { name, path: destination, content: approval.content, origin: '模型写入' }))
-    return `已写入 ${name}（${approval.content.length} 字）`
-  }, [native, state.files])
-
-  const runCalls = useCallback(async (calls: ToolCall[], assistantId: string) => {
-    for (const call of calls) {
-      let args: Record<string, string> = {}
-      try {
-        args = JSON.parse(call.arguments || '{}') as Record<string, string>
-      } catch {
-        patchAssistant(assistantId, steps => [...steps, { id: stepId(), label: `${titleFor(call.name)}（参数不完整）`, state: 'failed' }])
-        continue
-      }
-      const id = stepId()
-      patchAssistant(assistantId, steps => [...steps, { id, label: titleFor(call.name), state: 'running' }])
-      await new Promise(resolve => window.setTimeout(resolve, 260))
-
-      if (call.name === 'create_task' || call.name === 'create_goal') {
-        const collection = call.name === 'create_task' ? 'tasks' : 'goals'
-        const title = (args.title ?? '').trim()
-        if (!title) {
-          patchAssistant(assistantId, steps => steps.map(step => step.id === id ? { ...step, state: 'failed' } : step))
-          continue
-        }
-        setState(current => createItem(current, collection, title))
-        patchAssistant(assistantId, steps => steps.map(step => step.id === id ? { ...step, label: `${titleFor(call.name)}：${title}`, state: 'done' } : step))
-        continue
-      }
-
-      let request: ApprovalDraft | null = null
-      if (call.name === 'request_open_url' && args.url) request = { type: 'open_url', target: args.url, reason: args.reason ?? '' }
-      if (call.name === 'request_fetch_url' && args.url) request = { type: 'fetch_url', target: args.url, reason: args.reason ?? '' }
-      if (call.name === 'request_read_file' && args.path) request = { type: 'read_file', target: args.path, reason: args.reason ?? '' }
-      if (call.name === 'request_write_file' && args.path) request = { type: 'write_file', target: args.path, content: args.content ?? '', reason: args.reason ?? '' }
-
-      const draftRequest = request
-      if (!draftRequest) {
-        patchAssistant(assistantId, steps => steps.map(step => step.id === id ? { ...step, label: `${titleFor(call.name)}（信息不完整）`, state: 'failed' } : step))
-        continue
-      }
-
-      let label = '打开网页'
-      if (draftRequest.type === 'fetch_url') label = '读取网页'
-      else if (draftRequest.type === 'read_file') label = '读取文件'
-      else if (draftRequest.type === 'write_file') label = '写入文件'
-
-      setState(current => {
-        const approval: Approval = { ...draftRequest, id: crypto.randomUUID(), status: 'pending', createdAt: new Date().toISOString(), sessionId: current.activeSessionId }
-        return {
-          ...current,
-          approvals: [approval, ...current.approvals],
-          audit: [...current.audit, { id: crypto.randomUUID(), kind: 'approval_requested', title: '等待审批', detail: `${label}：${draftRequest.target}`, createdAt: new Date().toISOString(), sessionId: current.activeSessionId }],
-        }
-      })
-      patchAssistant(assistantId, steps => steps.map(step => step.id === id ? { ...step, label: `${label}：等待你确认`, state: 'pending' } : step))
-    }
-  }, [patchAssistant])
-
-  const send = useCallback(async (override?: string) => {
-    const text = (override ?? draft).trim()
-    if (!text || thinking) return
-    if (!settings.apiKey.trim()) { setSettingsOpen(true); notify('请先填写模型接口密钥。'); return }
-
-    const file = attachment
-    const history: Message[] = [
-      ...session.messages,
-      { id: crypto.randomUUID(), role: 'user', content: text, createdAt: new Date().toISOString(), attachment: file?.name },
-    ]
-
-    setDraft('')
-    setAttachment(null)
-
-    const assistantId = crypto.randomUUID()
-    setState(current => {
-      const appended = appendMessage(current, 'user', text, file?.name)
-      return updateMessage(
-        { ...appended, sessions: appended.sessions.map(item => item.id === appended.activeSessionId ? { ...item, messages: [...item.messages, { id: assistantId, role: 'assistant' as const, content: '', createdAt: new Date().toISOString(), steps: [] }] } : item) },
-        assistantId,
-        { steps: [] },
-      )
-    })
-
-    setThinking(true)
-    const controller = new AbortController()
-    abortRef.current = controller
-    let buffer = ''
-
-    try {
-      const context: RunContext = {
-        tasks: state.tasks.map(item => ({ title: item.title, done: item.done })),
-        goals: state.goals.map(item => ({ title: item.title, done: item.done })),
-        fileNames: [...state.files.map(item => item.name), ...(file ? [file.name] : [])],
-      }
-      const payload: Message[] = file
-        ? [...history.slice(0, -1), { ...history[history.length - 1], content: `${text}\n\n参考资料：\n${file.content.slice(0, 20_000)}` }]
-        : history
-
-      patchAssistant(assistantId, steps => [...steps, { id: stepId(), label: '思考中', state: 'running' }])
-      await streamCompletion(settings, payload, context, event => {
-        if (event.type === 'text') {
-          buffer += event.value
-          const snapshot = buffer
-          setState(current => updateMessage(current, assistantId, { content: snapshot }))
-        } else {
-          patchAssistant(assistantId, steps => steps.map(step => step.state === 'running' ? { ...step, state: 'done' } : step))
-          void runCalls(event.value, assistantId)
-        }
-      }, controller.signal)
-      setState(current => updateMessage(current, assistantId, { content: buffer || '我已经把上面的步骤记录到工作台，需要我继续推进哪一件事？' }))
-    } catch (cause) {
-      const aborted = cause instanceof DOMException && cause.name === 'AbortError'
-      const reason = cause instanceof Error ? cause.message : '生成过程中出现了问题。'
-      const fallback = buffer || (aborted ? '已停止生成。' : reason)
-      setState(current => updateMessage(current, assistantId, { content: fallback }))
-      notify(reason)
-    } finally {
-      setThinking(false)
-      abortRef.current = null
-    }
-  }, [attachment, draft, notify, patchAssistant, runCalls, session.messages, settings, state.files, state.goals, state.tasks, thinking])
-
-  const stop = useCallback(() => {
-    abortRef.current?.abort()
-    setThinking(false)
-  }, [])
-
-  const resolveApproval = useCallback(async (id: string, decision: 'approve' | 'reject') => {
-    const approval = state.approvals.find(item => item.id === id)
-    if (!approval || approval.status !== 'pending') return
-    if (decision === 'reject') {
-      commit('已拒绝这个请求。', current => rejectAction(current, id))
-      return
-    }
-    setState(current => approveAction(current, id))
-    try {
-      const result = await execute(approval)
-      const kind = approval.type === 'open_url' ? 'url_opened' : approval.type === 'fetch_url' ? 'url_fetched' : approval.type === 'read_file' ? 'file_read' : 'file_written'
-      setState(current => finishAction(current, id, kind, '操作已执行', result))
-      notify(result)
-    } catch (cause) {
-      const reason = cause instanceof Error ? cause.message : '执行这个操作时出现了问题。'
-      setState(current => failAction(current, id, reason))
-      notify(reason)
-    }
-  }, [commit, execute, notify, state.approvals])
+  }, [notify])
 
   const useFileInChat = useCallback((file: WorkspaceFile) => {
     if (!file.content) { notify('这份资料的内容没有保存在本地，请重新读取后再使用。'); return }
@@ -369,17 +577,108 @@ export default function App() {
   }, [notify])
 
   const createWorkspaceFile = useCallback((name: string, content: string) => {
-    commit(`已保存 ${name}`, current => addFile(current, { name, path: name, content, origin: '模型写入' }))
-  }, [commit])
+    setState(current => addFile(current, { name, path: name, content, origin: '模型生成' }))
+    notify(`已保存 ${name}`)
+  }, [notify])
+
+  /* ---------- 设置与数据 ---------- */
+
+  const saveSettings = useCallback((next: AgentSettings & { apiKey: string }) => {
+    setState(current => {
+      let next1 = updateSettings(current, { endpoint: next.endpoint, model: next.model, interests: next.interests })
+      for (const kind of PERMISSION_KINDS) {
+        if (next1.settings.permissions[kind] !== next.permissions[kind]) next1 = setPermission(next1, kind, next.permissions[kind])
+      }
+      return next1
+    })
+    setApiKey(next.apiKey)
+    setSettingsOpen(false)
+    notify('设置已保存。')
+  }, [notify])
+
+  const exportWorkspace = useCallback(() => {
+    const data = exportState(stateRef.current)
+    const blob = new Blob([data], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `lyra-workspace-${new Date().toISOString().slice(0, 10)}.json`
+    anchor.click()
+    URL.revokeObjectURL(url)
+    notify('已导出工作台备份。')
+  }, [notify])
+
+  const importWorkspace = useCallback(() => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.json,application/json'
+    input.onchange = async () => {
+      const file = input.files?.[0]
+      if (!file) return
+      try {
+        const next = importState(await file.text())
+        setState(next)
+        notify('已导入备份，工作台数据已恢复。')
+      } catch {
+        notify('导入失败：文件不是有效的工作台备份。')
+      }
+    }
+    input.click()
+  }, [notify])
+
+  /* ---------- 视图切换 ---------- */
+
+  const navigateHit = useCallback((hit: SearchHit) => {
+    setView(hit.view)
+    if (hit.sessionId) {
+      const id = hit.sessionId
+      setState(current => selectSession(current, id))
+    }
+    setSearchOpen(false)
+  }, [])
+
+  const chatAboutGoal = useCallback((goalId: string) => {
+    const goal = stateRef.current.goals.find(item => item.id === goalId)
+    if (!goal) return
+    setDraft(`我想推进目标「${goal.title}」${goal.why ? `（${goal.why}）` : ''}，请先帮我制定计划，再从第一步开始。`)
+    setView('chat')
+  }, [])
+
+  const chatIdea = useCallback((text: string) => {
+    setDraft(text)
+    setView('chat')
+  }, [])
+
+  const removeFileAttachment = useCallback(() => {
+    const name = attachment?.name
+    const target = stateRef.current.files.find(item => item.name === name)
+    if (target) {
+      setState(current => removeFile(current, target.id))
+      setAttachment(null)
+      notify('已从工作台移除这份文件。')
+    } else {
+      setAttachment(null)
+      notify('这次附件已经取消。')
+    }
+  }, [attachment, notify])
+
+  const toggleTheme = useCallback(() => {
+    setTheme(current => current === 'light' ? 'dark' : 'light')
+  }, [])
+
+  const commit = useCallback((message: string, updater: (current: WorkspaceState) => WorkspaceState) => {
+    setState(current => updater(current))
+    if (message) notify(message)
+  }, [notify])
 
   const body = (() => {
     if (view === 'chat') {
       return (
         <>
-          <ApprovalBar approvals={pending} onApprove={id => void resolveApproval(id, 'approve')} onReject={id => void resolveApproval(id, 'reject')} />
+          {pending.length ? <ApprovalBar approvals={pending} onApprove={id => void resolveApproval(id, 'approve')} onReject={id => void resolveApproval(id, 'reject')} /> : null}
           <ChatView
             session={session}
-            thinking={thinking}
+            thinking={busy}
             draft={draft}
             attachment={attachment}
             onDraft={setDraft}
@@ -387,35 +686,60 @@ export default function App() {
             onStop={stop}
             onPickFile={() => void pickFile()}
             onClearAttachment={() => setAttachment(null)}
-            onRemoveFileAttachment={() => {
-              const name = attachment?.name ?? session.messages.at(-1)?.attachment
-              const target = state.files.find(item => item.name === name)
-              if (target) commit('已从工作台移除这份文件。', current => removeFile(current, target.id))
-              else { setAttachment(null); notify('这次附件已经取消。') }
-            }}
+            onRemoveFileAttachment={removeFileAttachment}
+            onOpenGoals={() => setView('goals')}
             empty={session.messages.length === 0}
           />
         </>
       )
     }
-    if (view === 'tasks' || view === 'goals') {
+    if (view === 'goals') {
       return (
-        <ItemsView
-          collection={view}
-          items={view === 'tasks' ? state.tasks : state.goals}
-          onCreate={(collection, title) => commit('', current => createItem(current, collection, title))}
-          onToggle={(collection, id) => commit('', current => toggleItem(current, collection, id))}
-          onNote={(collection, id, note) => commit('', current => updateItem(current, collection, id, note))}
-          onRemove={(collection, id) => commit('', current => removeItem(current, collection, id))}
+        <GoalsView
+          state={state}
+          busy={Boolean(planningId)}
+          planningId={planningId}
+          onCreateGoal={(title, why) => commit('', current => createGoal(current, title, why))}
+          onPlan={id => void planFor(id)}
+          onStatus={(id, status: GoalStatus) => commit('', current => updateGoal(current, id, { status }))}
+          onRemoveGoal={id => commit('已删除这个目标。', current => removeGoal(current, id))}
+          onToggleTask={id => commit('', current => toggleTask(current, id))}
+          onAddTask={(goalId, title) => commit('', current => createTask(current, title, goalId))}
+          onRemoveTask={id => commit('已删除这条任务。', current => removeTask(current, id))}
+          onChatAbout={chatAboutGoal}
+        />
+      )
+    }
+    if (view === 'ideas') {
+      return (
+        <IdeasView
+          state={state}
+          busy={ideasBusy}
+          briefingBusy={briefingBusy}
+          onGenerate={() => void refreshIdeas()}
+          onBriefing={() => void refreshBriefing()}
+          onAccept={id => commit('已采纳为任务。', current => acceptSuggestion(current, id))}
+          onDismiss={id => commit('', current => dismissSuggestion(current, id))}
+          onChat={chatIdea}
+        />
+      )
+    }
+    if (view === 'memory') {
+      return (
+        <MemoryView
+          state={state}
+          onAdd={content => commit('天琴记住了。', current => saveMemory(current, content, '手动添加'))}
+          onForget={id => commit('已遗忘这条记忆。', current => forgetMemory(current, id))}
+          onPin={id => commit('', current => toggleMemoryPin(current, id))}
         />
       )
     }
     if (view === 'files') {
       return (
         <FilesView
-          files={state.files}
+          state={state}
           native={native}
-          busy={busy}
+          busy={fileBusy}
           onPick={() => void pickFile()}
           onReadPath={path => void readPathIntoWorkspace(path)}
           onCreate={createWorkspaceFile}
@@ -424,20 +748,30 @@ export default function App() {
         />
       )
     }
-    if (view === 'actions') return <ActionsView approvals={state.approvals} actions={state.actions} />
-    return <AuditView audit={state.audit} />
+    return (
+      <AuditView
+        state={state}
+        onApprove={id => void resolveApproval(id, 'approve')}
+        onReject={id => void resolveApproval(id, 'reject')}
+      />
+    )
   })()
+
+  const title = view === 'chat' ? session.title : VIEW_TITLE[view]
 
   return (
     <div className={`app${sidebarOpen ? ' sidebar-visible' : ''}`}>
       <Sidebar
         state={state}
         view={view}
+        theme={theme}
         onView={next => { setView(next); setSidebarOpen(false) }}
         onSelect={id => { setState(current => selectSession(current, id)); setView('chat'); setSidebarOpen(false) }}
         onNew={() => { setState(startSession); setView('chat'); setSidebarOpen(false) }}
         onRemove={id => commit('已移除这条对话。', current => removeSession(current, id))}
         onSettings={() => setSettingsOpen(true)}
+        onSearch={() => setSearchOpen(true)}
+        onTheme={toggleTheme}
         onClose={() => setSidebarOpen(false)}
       />
 
@@ -445,31 +779,37 @@ export default function App() {
         <header className="topbar">
           <button className="icon-btn menu-btn" type="button" onClick={() => setSidebarOpen(true)} title="展开导航"><PanelLeft size={17} /></button>
           <div className="topbar-title">
-            <strong>{session.title}</strong>
+            <strong>{title}</strong>
             <span>{platformLabel()} · {describeWorkspace(state)}</span>
           </div>
           <div className="topbar-right">
-            <span className="model-chip"><Sparkles size={13} />{settings.model || '未配置模型'}</span>
-            <button className="ghost-btn" type="button" onClick={toggleTheme}>{theme === 'light' ? '深色模式' : '浅色模式'}</button>
+            <span className="model-chip"><Sparkles size={13} />{state.settings.model || '未配置模型'}</span>
+            <button className="icon-btn" type="button" onClick={() => setSearchOpen(true)} title="全局搜索（Ctrl+K）"><Search size={16} /></button>
           </div>
         </header>
 
         <div className="body-area">
           <section className="content">{body}</section>
-          {view === 'chat' ? (
-            <ContextPanel
-              state={state}
-              onCreate={(collection, title) => commit('', current => createItem(current, collection, title))}
-              onToggle={(collection, id) => commit('', current => toggleItem(current, collection, id))}
-              onOpenFile={() => setView('files')}
-              onView={next => setView(next)}
-            />
-          ) : null}
         </div>
       </main>
 
       {toast ? <div className="toast" role="status">{toast}</div> : null}
-      {settingsOpen ? <SettingsDialog settings={settings} onSave={next => { setSettings(next); setSettingsOpen(false); notify('模型设置已更新。') }} onClose={() => setSettingsOpen(false)} /> : null}
+      {settingsOpen ? (
+        <SettingsDialog
+          settings={state.settings}
+          onSave={saveSettings}
+          onExport={exportWorkspace}
+          onImport={importWorkspace}
+          onClose={() => setSettingsOpen(false)}
+        />
+      ) : null}
+      {searchOpen ? (
+        <SearchDialog
+          state={state}
+          onClose={() => setSearchOpen(false)}
+          onNavigate={navigateHit}
+        />
+      ) : null}
     </div>
   )
 }

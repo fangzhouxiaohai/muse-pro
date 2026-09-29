@@ -1,42 +1,47 @@
 import { useMemo, useState } from 'react'
 import {
-  Database,
-  PanelLeftClose,
-  FileText,
+  Brain,
   Flag,
-  ListChecks,
+  FolderOpen,
+  Lightbulb,
   MessageSquare,
+  Moon,
+  PanelLeftClose,
   Plus,
   ScrollText,
   Search,
   Settings,
+  Sun,
   Trash2,
-  Waypoints,
 } from 'lucide-react'
+import LyraMark from './LyraMark'
 import type { View, WorkspaceState } from '../core'
 import { initialOf } from '../format'
 
 type Props = {
   state: WorkspaceState
   view: View
+  theme: 'light' | 'dark'
   onView: (view: View) => void
   onSelect: (id: string) => void
   onNew: () => void
   onRemove: (id: string) => void
   onSettings: () => void
+  onSearch: () => void
+  onTheme: () => void
   onClose: () => void
 }
 
 const NAV: { key: View; label: string; icon: typeof MessageSquare }[] = [
   { key: 'chat', label: '对话', icon: MessageSquare },
-  { key: 'tasks', label: '任务', icon: ListChecks },
   { key: 'goals', label: '目标', icon: Flag },
-  { key: 'files', label: '资料', icon: FileText },
-  { key: 'actions', label: '行动', icon: Waypoints },
+  { key: 'ideas', label: '想法', icon: Lightbulb },
+  { key: 'memory', label: '记忆', icon: Brain },
+  { key: 'files', label: '资料库', icon: FolderOpen },
   { key: 'audit', label: '审计', icon: ScrollText },
 ]
 
-export default function Sidebar({ state, view, onView, onSelect, onNew, onRemove, onSettings, onClose }: Props) {
+export default function Sidebar({ state, view, theme, onView, onSelect, onNew, onRemove, onSettings, onSearch, onTheme, onClose }: Props) {
   const [keyword, setKeyword] = useState('')
 
   const sessions = useMemo(() => {
@@ -48,23 +53,22 @@ export default function Sidebar({ state, view, onView, onSelect, onNew, onRemove
     })
   }, [state.sessions, keyword])
 
-  const pendingCount = state.approvals.filter(item => item.status === 'pending').length
   const counters: Record<View, number> = {
     chat: state.sessions.length,
-    tasks: state.tasks.length,
     goals: state.goals.length,
+    ideas: state.suggestions.filter(item => item.status === 'new').length,
+    memory: state.memories.length,
     files: state.files.length,
-    actions: state.actions.length,
-    audit: state.audit.length,
+    audit: state.approvals.filter(item => item.status === 'pending').length,
   }
 
   return (
     <aside className="sidebar">
       <div className="brand">
-        <div className="brand-mark" aria-hidden="true"><Database size={18} /></div>
+        <div className="brand-logo"><LyraMark size={34} /></div>
         <div className="brand-text">
-          <strong>Muse Pro</strong>
-          <span>个人 AI 工作台</span>
+          <strong>天琴 Lyra</strong>
+          <span>你的私人 AI 智能体</span>
         </div>
         <button className="icon-btn sidebar-close" type="button" onClick={onClose} title="收起导航"><PanelLeftClose size={15} /></button>
       </div>
@@ -74,8 +78,8 @@ export default function Sidebar({ state, view, onView, onSelect, onNew, onRemove
           <button key={item.key} className={`nav-item${view === item.key ? ' active' : ''}`} type="button" onClick={() => onView(item.key)}>
             <item.icon size={17} />
             <span>{item.label}</span>
-            {item.key === 'actions' && pendingCount > 0
-              ? <em className="badge">{pendingCount}</em>
+            {item.key === 'audit' && counters.audit > 0
+              ? <em className="badge">{counters.audit}</em>
               : counters[item.key] > 0 ? <em className="count">{counters[item.key]}</em> : null}
           </button>
         ))}
@@ -112,7 +116,14 @@ export default function Sidebar({ state, view, onView, onSelect, onNew, onRemove
       </section>
 
       <footer className="sidebar-foot">
-        <button className="ghost-btn wide" type="button" onClick={onSettings}><Settings size={15} /><span>模型设置</span></button>
+        <button className="ghost-btn wide" type="button" onClick={onSearch} title="全局搜索（Ctrl+K）"><Search size={15} /><span>全局搜索</span><em className="kbd">Ctrl K</em></button>
+        <div className="foot-row">
+          <button className="ghost-btn" type="button" onClick={onTheme} title="切换主题">
+            {theme === 'light' ? <Moon size={15} /> : <Sun size={15} />}
+            <span>{theme === 'light' ? '深色' : '浅色'}</span>
+          </button>
+          <button className="ghost-btn" type="button" onClick={onSettings}><Settings size={15} /><span>设置</span></button>
+        </div>
       </footer>
     </aside>
   )

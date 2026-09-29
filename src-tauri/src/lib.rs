@@ -81,5 +81,5 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![read_text_file, write_text_file, file_exists])
         .run(tauri::generate_context!())
-        .expect("无法启动 Muse Pro");
+        .expect("无法启动天琴 Lyra");
 }
