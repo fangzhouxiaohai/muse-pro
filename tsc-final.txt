@@ -1,2 +1,0 @@
-npm notice run lyra@0.2.0 npx
-npm notice run tsc --noEmit -p tsconfig.json
