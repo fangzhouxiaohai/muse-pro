@@ -6,7 +6,9 @@
 
 ## 下载
 
-Windows 安装包在 [Releases](https://github.com/fangzhouxiaohai/muse-pro/releases/latest) 页面下载，推荐使用安装程序 `Lyra_0.2.0_x64-setup.exe`。详细文件说明见文末的下载安装包一节。
+当前源码版本为 **天琴 Lyra 0.2.0**，该版本的安装包尚未发布到 GitHub Releases。如需体验本文介绍的 Lyra 功能，请按下方「常用命令」从源码运行或构建。
+
+已发布的 Windows 安装包为旧版 [Muse Pro 0.1.0](https://github.com/fangzhouxiaohai/muse-pro/releases/tag/v0.1.0)，功能以该版本发布说明为准。详细下载入口见文末的「下载安装包」一节。
 
 ## 功能一览
 
@@ -108,15 +110,21 @@ macOS 构建会生成 `.app` 与 `.dmg`，需要在 macOS 环境中执行。
 
 ## 下载安装包
 
-Windows 安装包可以从版本发布页直接下载：[Releases](https://github.com/fangzhouxiaohai/muse-pro/releases)
+### 已发布：Muse Pro 0.1.0（旧版）
+
+以下链接对应 [Muse Pro 0.1.0 发布页](https://github.com/fangzhouxiaohai/muse-pro/releases/tag/v0.1.0) 中的 Windows 安装包。它们是旧版 Muse Pro，不包含本文介绍的 Lyra 0.2.0 全部功能。
 
 | 下载文件 | 说明 |
 | --- | --- |
-| [Lyra_0.2.0_x64-setup.exe](https://github.com/fangzhouxiaohai/muse-pro/releases/download/v0.2.0/Lyra_0.2.0_x64-setup.exe) | 推荐。安装程序，安装时可切换简体中文与英文 |
-| [Lyra_0.2.0_x64_zh-CN.msi](https://github.com/fangzhouxiaohai/muse-pro/releases/download/v0.2.0/Lyra_0.2.0_x64_zh-CN.msi) | 简体中文安装包 |
-| [Lyra_0.2.0_x64_en-US.msi](https://github.com/fangzhouxiaohai/muse-pro/releases/download/v0.2.0/Lyra_0.2.0_x64_en-US.msi) | 英文安装包 |
+| [Muse-Pro-0.1.0-x64-setup.exe](https://github.com/fangzhouxiaohai/muse-pro/releases/download/v0.1.0/Muse-Pro-0.1.0-x64-setup.exe) | 旧版安装程序，安装时可切换简体中文与英文 |
+| [Muse-Pro-0.1.0-x64-zh-CN.msi](https://github.com/fangzhouxiaohai/muse-pro/releases/download/v0.1.0/Muse-Pro-0.1.0-x64-zh-CN.msi) | 旧版简体中文安装包 |
+| [Muse-Pro-0.1.0-x64-en-US.msi](https://github.com/fangzhouxiaohai/muse-pro/releases/download/v0.1.0/Muse-Pro-0.1.0-x64-en-US.msi) | 旧版英文安装包 |
 
-安装包适用于 Windows x64，需要 Windows 10 1809 及以上版本与 WebView2 运行时。macOS 的 `.app` 与 `.dmg` 需要在 macOS 环境中构建。
+安装包适用于 Windows x64，需要 Windows 10 1809 及以上版本与 WebView2 运行时。
+
+### 天琴 Lyra 0.2.0：从源码运行或构建
+
+Lyra 0.2.0 安装包尚未发布到 [Releases](https://github.com/fangzhouxiaohai/muse-pro/releases)。上方「常用命令」中的 `Lyra_0.2.0_x64-*` 文件名是本地构建产物说明，不是已发布的下载链接。Windows 安装包需在 Windows 环境中构建；macOS 的 `.app` 与 `.dmg` 需在 macOS 环境中构建。
 
 ## 联系方式
 
